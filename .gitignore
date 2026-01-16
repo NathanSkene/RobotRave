@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+mint_env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Data files
+*.npy
+*.pkl
+*.h5
+*.ckpt
+*.pth
+
+# Audio/Video
+*.wav
+*.mp3
+*.mp4
+*.avi
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# Credentials/secrets
+.env
+*.key
+credentials.json
+
+# Large model files
+mint/checkpoints/
+*.tar.gz
+
+# Server package (deploy separately)
+server_package/
+
+# Separate git repos / submodules
+MDLT/
+TonyPi/
+mint/
+robot_dance_generation/
+
+# Secrets
+*.pem
+server_package.zip

@@ -1,0 +1,64 @@
+{
+  "robot_name": "Tony Pro",
+  "total_servos": 16,
+  "pulse_range": {
+    "min": 0,
+    "max": 1000,
+    "center": 500
+  },
+  "servos": {
+    "1": {"name": "right_hip_roll", "group": "right_leg"},
+    "2": {"name": "right_hip_yaw", "group": "right_leg"},
+    "3": {"name": "right_knee_pitch", "group": "right_leg"},
+    "4": {"name": "right_hip_pitch", "group": "right_leg"},
+    "5": {"name": "right_elbow_pitch", "group": "right_arm"},
+    "6": {"name": "right_ankle_pitch", "group": "right_leg"},
+    "7": {"name": "right_shoulder_pitch", "group": "right_arm"},
+    "8": {"name": "head_pitch", "group": "head"},
+    "9": {"name": "left_hip_roll", "group": "left_leg"},
+    "10": {"name": "left_hip_yaw", "group": "left_leg"},
+    "11": {"name": "left_knee_pitch", "group": "left_leg"},
+    "12": {"name": "left_hip_pitch", "group": "left_leg"},
+    "13": {"name": "left_elbow_pitch", "group": "left_arm"},
+    "14": {"name": "left_ankle_pitch", "group": "left_leg"},
+    "15": {"name": "left_shoulder_pitch", "group": "left_arm"},
+    "16": {"name": "head_yaw", "group": "head"}
+  },
+  "groups": {
+    "head": [8, 16],
+    "right_arm": [7, 5],
+    "left_arm": [15, 13],
+    "right_leg": [1, 2, 4, 3, 6],
+    "left_leg": [9, 10, 12, 11, 14]
+  },
+  "joint_mapping": {
+    "head_pitch": 8,
+    "head_yaw": 16,
+    "right_shoulder_pitch": 7,
+    "right_elbow_pitch": 5,
+    "left_shoulder_pitch": 15,
+    "left_elbow_pitch": 13,
+    "right_hip_roll": 1,
+    "right_hip_yaw": 2,
+    "right_hip_pitch": 4,
+    "right_knee_pitch": 3,
+    "right_ankle_pitch": 6,
+    "left_hip_roll": 9,
+    "left_hip_yaw": 10,
+    "left_hip_pitch": 12,
+    "left_knee_pitch": 11,
+    "left_ankle_pitch": 14
+  },
+  "safe_defaults": {
+    "arms_only": [7, 5, 15, 13, 8, 16],
+    "upper_body": [7, 5, 15, 13, 8, 16],
+    "full_body": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+  },
+  "notes": {
+    "created": "2025-01-16",
+    "description": "Tony Pro 16-servo humanoid robot configuration",
+    "arm_dof": "Each arm has 2 DOF: shoulder pitch + elbow pitch (no roll/wrist)",
+    "leg_dof": "Each leg has 5 DOF: hip roll/yaw/pitch + knee pitch + ankle pitch",
+    "head_dof": "Head has 2 DOF: pitch (up/down) + yaw (left/right)"
+  }
+}

@@ -7,8 +7,98 @@ Usage: python generate_dance.py --audio your_song.mp3 --output dance.npy
 import os
 import sys
 import argparse
+import gc
+import subprocess
 import numpy as np
 import tensorflow as tf
+
+# Enable GPU memory growth BEFORE any TF operations
+# This prevents TF from allocating all GPU memory upfront
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+    print(f"Enabled memory growth for {len(gpus)} GPU(s)")
+
+
+def check_gpu_memory(min_free_gb=10, auto_kill=False):
+    """Check GPU memory and optionally kill other processes.
+
+    Args:
+        min_free_gb: Minimum free GPU memory required (in GB)
+        auto_kill: If True, automatically kill other GPU processes
+
+    Returns:
+        True if enough memory is available, False otherwise
+    """
+    try:
+        # Get GPU memory info
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.total,memory.free,memory.used', '--format=csv,noheader,nounits'],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print("Warning: Could not query GPU memory")
+            return True
+
+        total, free, used = map(int, result.stdout.strip().split(','))
+        free_gb = free / 1024
+        used_gb = used / 1024
+        total_gb = total / 1024
+
+        print(f"GPU Memory: {free_gb:.1f}GB free / {total_gb:.1f}GB total ({used_gb:.1f}GB used)")
+
+        if free_gb >= min_free_gb:
+            return True
+
+        # Not enough memory - check what's using it
+        print(f"Warning: Only {free_gb:.1f}GB free, need {min_free_gb}GB")
+
+        # Get processes using GPU
+        result = subprocess.run(
+            ['nvidia-smi', '--query-compute-apps=pid,used_memory,process_name', '--format=csv,noheader,nounits'],
+            capture_output=True, text=True
+        )
+
+        if result.stdout.strip():
+            print("Processes using GPU:")
+            current_pid = os.getpid()
+            other_pids = []
+
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split(',')
+                if len(parts) >= 3:
+                    pid, mem, name = int(parts[0].strip()), parts[1].strip(), parts[2].strip()
+                    marker = " (this process)" if pid == current_pid else ""
+                    print(f"  PID {pid}: {mem}MB - {name}{marker}")
+                    if pid != current_pid:
+                        other_pids.append(pid)
+
+            if other_pids and auto_kill:
+                print(f"Auto-killing {len(other_pids)} other GPU process(es)...")
+                for pid in other_pids:
+                    try:
+                        os.kill(pid, 9)
+                        print(f"  Killed PID {pid}")
+                    except ProcessLookupError:
+                        pass
+                    except PermissionError:
+                        print(f"  Cannot kill PID {pid} (permission denied)")
+
+                # Wait and recheck
+                import time
+                time.sleep(2)
+                return check_gpu_memory(min_free_gb, auto_kill=False)
+            elif other_pids:
+                print(f"Run with --clear-gpu to auto-kill other processes, or manually: kill {' '.join(map(str, other_pids))}")
+                return False
+
+        return free_gb >= min_free_gb
+
+    except FileNotFoundError:
+        print("Warning: nvidia-smi not found, skipping GPU memory check")
+        return True
+
 import soundfile as sf
 from scipy import signal
 from scipy.fftpack import dct
@@ -53,6 +143,38 @@ def mel_filterbank(sr, n_fft, n_mels=128, fmin=0, fmax=None):
     return filterbank
 
 
+def extract_audio_features_from_array(audio_data, sample_rate, target_fps=60):
+    """Extract 35-dim audio features from audio array.
+
+    Args:
+        audio_data: Audio samples as numpy array
+        sample_rate: Sample rate of the audio
+        target_fps: Target frame rate (default 60)
+
+    Returns:
+        [n_frames, 35] audio features
+    """
+    HOP_LENGTH = 512
+    N_FFT = 2048
+    SR = target_fps * HOP_LENGTH  # 30720 Hz
+
+    data = audio_data.copy()
+
+    # Convert to mono if stereo
+    if len(data.shape) > 1:
+        data = data.mean(axis=1)
+
+    # Resample if needed
+    if sample_rate != SR:
+        print(f"Resampling from {sample_rate} to {SR}...")
+        num_samples = int(len(data) * SR / sample_rate)
+        data = signal.resample(data, num_samples)
+
+    data = data.astype(np.float32)
+
+    return _extract_features_from_samples(data, target_fps)
+
+
 def extract_audio_features(audio_path, target_fps=60):
     """Extract 35-dim audio features from audio file (without librosa/numba)."""
     HOP_LENGTH = 512
@@ -73,6 +195,15 @@ def extract_audio_features(audio_path, target_fps=60):
         data = signal.resample(data, num_samples)
 
     data = data.astype(np.float32)
+
+    return _extract_features_from_samples(data, target_fps)
+
+
+def _extract_features_from_samples(data, target_fps=60):
+    """Internal function to extract features from preprocessed audio samples."""
+    HOP_LENGTH = 512
+    N_FFT = 2048
+    SR = target_fps * HOP_LENGTH  # 30720 Hz
 
     print("Extracting features...")
     n_frames = 1 + (len(data) - N_FFT) // HOP_LENGTH
@@ -181,18 +312,27 @@ def load_model(config_path, checkpoint_dir):
 
 
 def generate_dance(model, audio_features, seed_motion, steps=600):
-    """Generate dance motion from audio.
+    """Generate dance motion from audio using FACT model.
+
+    The model uses infer_auto_regressive() which:
+    - Takes FULL audio sequence upfront (model slides 240-frame window internally)
+    - Maintains 120-frame motion buffer (rolling, not full history)
+    - Each step: 360 total frames (120 motion + 240 audio)
+
+    DO NOT chunk by restarting - this breaks the sliding window mechanism!
 
     Args:
         model: FACT model
-        audio_features: [seq_len, 35] audio features
+        audio_features: [seq_len, 35] audio features (must be >= steps + 240)
         seed_motion: [120, 225] seed motion (2 seconds)
         steps: number of frames to generate (60fps, so 600 = 10 seconds)
 
     Returns:
         Generated motion [steps, 225]
     """
-    # Prepare inputs
+    print(f"Generating {steps} frames of dance ({steps/60:.1f} seconds)...")
+
+    # Prepare inputs - pass FULL audio sequence
     motion_input = tf.constant(seed_motion[np.newaxis, :, :], dtype=tf.float32)
     audio_input = tf.constant(audio_features[np.newaxis, :, :], dtype=tf.float32)
 
@@ -201,10 +341,17 @@ def generate_dance(model, audio_features, seed_motion, steps=600):
         "audio_input": audio_input
     }
 
-    print(f"Generating {steps} frames of dance ({steps/60:.1f} seconds)...")
+    # Single call - model handles the autoregressive loop internally
     outputs = model.infer_auto_regressive(inputs, steps=steps)
+    motion = outputs[0].numpy()
 
-    return outputs[0].numpy()  # Remove batch dimension
+    # Clean up to free GPU memory
+    del outputs, inputs, motion_input, audio_input
+    gc.collect()
+    tf.keras.backend.clear_session()
+
+    print(f"  Generated {len(motion)} frames")
+    return motion
 
 
 def motion_to_joint_angles(motion):
@@ -243,7 +390,15 @@ def main():
     parser.add_argument('--duration', type=float, default=10.0, help='Duration to generate (seconds)')
     parser.add_argument('--config', type=str, default='mint/configs/fact_v5_deeper_t10_cm12.config')
     parser.add_argument('--checkpoint', type=str, default='mint/checkpoints')
+    parser.add_argument('--no-clear-gpu', action='store_true', help='Do NOT auto-kill other GPU processes')
+    parser.add_argument('--min-gpu-memory', type=float, default=10.0, help='Minimum free GPU memory in GB (default: 10)')
     args = parser.parse_args()
+
+    # Check GPU memory before loading model (auto-kill other processes by default)
+    auto_kill = not args.no_clear_gpu
+    if not check_gpu_memory(min_free_gb=args.min_gpu_memory, auto_kill=auto_kill):
+        print("Error: Not enough GPU memory available.")
+        sys.exit(1)
 
     # Extract audio features
     audio_features = extract_audio_features(args.audio)

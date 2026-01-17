@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FACT Dance Visualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-top: 4px;
+        }
+        .container {
+            display: flex;
+            flex: 1;
+            padding: 20px;
+            gap: 20px;
+            overflow: hidden;
+            max-height: calc(100vh - 80px);
+        }
+        .visualizer {
+            flex: 2;
+            background: #111;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+        }
+        .visualizer::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 50% 80%, rgba(80, 120, 255, 0.1) 0%, transparent 50%);
+        }
+        .timeline-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            padding: 10px;
+        }
+        #timeline-canvas {
+            width: 100%;
+            height: 150px;
+        }
+        canvas {
+            position: relative;
+            z-index: 1;
+        }
+        .sidebar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-width: 400px;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .panel {
+            background: #151520;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #252530;
+        }
+        .panel h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #252530;
+        }
+        .status-row:last-child {
+            border-bottom: none;
+        }
+        .status-label {
+            color: #888;
+        }
+        .status-value {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 14px;
+        }
+        .status-value.connected {
+            color: #4ade80;
+        }
+        .status-value.disconnected {
+            color: #f87171;
+        }
+        .status-value.listening {
+            color: #f472b6;
+        }
+        .servo-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        .servo-item {
+            background: #1a1a25;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .servo-name {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .servo-bar {
+            height: 6px;
+            background: #252535;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+        .servo-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            border-radius: 3px;
+            transition: width 0.05s ease-out;
+            position: absolute;
+            left: 50%;
+            transform-origin: left center;
+        }
+        .servo-value {
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+            color: #aaa;
+            margin-top: 4px;
+            text-align: right;
+        }
+        .btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+        .btn:disabled {
+            background: #333;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .btn.connected {
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+        }
+        .btn.listening {
+            background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.4); }
+            50% { box-shadow: 0 0 0 10px rgba(236, 72, 153, 0); }
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            background: #1a1a25;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-family: 'SF Mono', Monaco, monospace;
+            margin-bottom: 12px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        .log {
+            flex: 1;
+            min-height: 100px;
+            max-height: 150px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .log-entry {
+            padding: 2px 0;
+            color: #888;
+        }
+        .log-entry.error {
+            color: #f87171;
+        }
+        .log-entry.success {
+            color: #4ade80;
+        }
+        .log-entry.info {
+            color: #60a5fa;
+        }
+        .log-entry.audio {
+            color: #f472b6;
+        }
+
+        /* Audio visualizer */
+        .audio-viz-container {
+            margin-top: 12px;
+            background: #1a1a25;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .audio-canvas {
+            width: 100%;
+            height: 60px;
+            border-radius: 4px;
+        }
+        .audio-stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #666;
+        }
+        .audio-stat {
+            text-align: center;
+        }
+        .audio-stat-value {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 14px;
+            color: #f472b6;
+        }
+        .level-meter {
+            height: 8px;
+            background: #252535;
+            border-radius: 4px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+        .level-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+            border-radius: 4px;
+            transition: width 0.05s ease-out;
+            width: 0%;
+        }
+        .mic-icon {
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .button-row {
+            display: flex;
+            gap: 8px;
+        }
+        .button-row .btn {
+            flex: 1;
+        }
+        .raw-feed {
+            flex: 1;
+            min-height: 200px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            background: #0a0a10;
+            padding: 8px;
+            border-radius: 6px;
+        }
+        .raw-msg {
+            padding: 2px 0;
+            border-bottom: 1px solid #1a1a25;
+            word-break: break-all;
+        }
+        .raw-msg .timestamp {
+            color: #666;
+        }
+        .raw-msg .type {
+            color: #f472b6;
+            font-weight: 600;
+        }
+        .raw-msg .data {
+            color: #888;
+        }
+        .raw-msg.servo .type {
+            color: #4ade80;
+        }
+
+        /* File upload area */
+        .file-upload-area {
+            background: #1a1a25;
+            border: 2px dashed #333;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .file-upload-area:hover, .file-upload-area.dragover {
+            border-color: #3b82f6;
+            background: #1e1e2d;
+        }
+        .file-upload-area a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        .file-upload-area a:hover {
+            text-decoration: underline;
+        }
+        .progress-bar {
+            height: 8px;
+            background: #252535;
+            border-radius: 4px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .playback-controls {
+            display: flex;
+            gap: 8px;
+        }
+        .playback-controls .btn {
+            flex: 1;
+        }
+        #playback-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #252535;
+            height: 6px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #playback-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>FACT Dance Visualizer</h1>
+        <div class="subtitle">Real-time motion streaming from Lambda Labs GPU server</div>
+    </header>
+
+    <div class="container">
+        <div class="visualizer">
+            <canvas id="robot-canvas" width="600" height="500"></canvas>
+            <div class="timeline-container">
+                <canvas id="timeline-canvas" width="600" height="180"></canvas>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="panel">
+                <h2>Connection</h2>
+                <input type="text" id="server-url" value="ws://132.145.180.105:8765" placeholder="WebSocket URL">
+                <button id="connect-btn" class="btn">Connect</button>
+            </div>
+
+            <div class="panel">
+                <h2>Batch Mode</h2>
+                <div class="file-upload-area" id="drop-zone">
+                    <input type="file" id="audio-file" accept="audio/*" style="display:none">
+                    <div id="upload-prompt">
+                        <div style="font-size: 24px; margin-bottom: 8px;">📁</div>
+                        <div>Drop audio file or <a href="#" id="browse-link">browse</a></div>
+                        <div style="font-size: 11px; color: #666; margin-top: 4px;">MP3, WAV, etc.</div>
+                        <div id="upload-status" style="font-size: 11px; color: #f87171; margin-top: 8px;">⚠ Connect to server first</div>
+                    </div>
+                    <div id="upload-progress" style="display:none">
+                        <div id="progress-text">Processing...</div>
+                        <div class="progress-bar">
+                            <div id="progress-fill" class="progress-fill"></div>
+                        </div>
+                        <div id="progress-details" style="font-size: 11px; color: #888; margin-top: 4px;"></div>
+                    </div>
+                </div>
+                <div class="button-row" style="margin-top: 12px;">
+                    <button id="load-dance-btn" class="btn" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">Load Dance JSON</button>
+                    <input type="file" id="dance-file" accept=".json" style="display:none">
+                </div>
+            </div>
+
+            <div class="panel" id="playback-panel" style="display:none">
+                <h2>Playback</h2>
+                <div id="dance-info" style="font-size: 12px; color: #888; margin-bottom: 12px;"></div>
+                <div class="button-row" style="margin-bottom: 12px;">
+                    <button id="load-audio-btn" class="btn" style="background: linear-gradient(135deg, #f472b6 0%, #db2777 100%);">Load Audio</button>
+                    <input type="file" id="playback-audio-file" accept="audio/*" style="display:none">
+                </div>
+                <div id="audio-status" style="font-size: 11px; color: #666; margin-bottom: 12px;">No audio loaded</div>
+                <div class="playback-controls">
+                    <button id="play-btn" class="btn">▶ Play</button>
+                </div>
+                <div style="margin-top: 12px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666;">
+                        <span id="current-time">0:00</span>
+                        <span id="total-time">0:00</span>
+                    </div>
+                    <input type="range" id="playback-slider" min="0" max="100" value="0" style="width: 100%; margin-top: 4px;">
+                </div>
+                <div class="button-row" style="margin-top: 12px;">
+                    <button id="download-dance-btn" class="btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">Download JSON</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Microphone (Real-time)</h2>
+                <button id="mic-btn" class="btn" disabled>
+                    <span class="mic-icon">🎤</span>
+                    <span id="mic-btn-text">Start Listening</span>
+                </button>
+                <div class="audio-viz-container">
+                    <canvas id="audio-canvas" class="audio-canvas"></canvas>
+                    <div class="level-meter">
+                        <div id="level-fill" class="level-fill"></div>
+                    </div>
+                    <div class="audio-stats">
+                        <div class="audio-stat">
+                            <div class="audio-stat-value" id="audio-level">0</div>
+                            <div>Level (dB)</div>
+                        </div>
+                        <div class="audio-stat">
+                            <div class="audio-stat-value" id="chunks-sent">0</div>
+                            <div>Chunks Sent</div>
+                        </div>
+                        <div class="audio-stat">
+                            <div class="audio-stat-value" id="audio-rate">0</div>
+                            <div>Chunks/s</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Status</h2>
+                <div class="status-row">
+                    <span class="status-label">Connection</span>
+                    <span id="conn-status" class="status-value disconnected">Disconnected</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Microphone</span>
+                    <span id="mic-status" class="status-value disconnected">Off</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Server FPS</span>
+                    <span id="server-fps" class="status-value">--</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Inference</span>
+                    <span id="inference-ms" class="status-value">--</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Servo Msgs/s</span>
+                    <span id="msg-rate" class="status-value">--</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Servo Values</h2>
+                <div id="servo-grid" class="servo-grid"></div>
+            </div>
+
+            <div class="panel" style="flex: 1; display: flex; flex-direction: column;">
+                <h2>Log</h2>
+                <div id="log" class="log"></div>
+            </div>
+
+            <div class="panel" style="flex: 2; display: flex; flex-direction: column;">
+                <h2>Server Messages (Raw Feed)</h2>
+                <div id="raw-feed" class="raw-feed"></div>
+                <button id="download-logs-btn" class="btn" style="margin-top: 10px; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);">Download Logs</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration - match fact_client.py
+        const SAMPLE_RATE = 30720;
+        const CHUNK_DURATION = 0.1; // seconds
+        const CHUNK_SIZE = Math.floor(SAMPLE_RATE * CHUNK_DURATION); // 3072 samples
+
+        // Servo name mapping (from tony_pro.py - FULL BODY)
+        const SERVO_NAMES = {
+            // Head (PWM)
+            'pwm1': 'Head Pitch',
+            'pwm2': 'Head Yaw',
+            // Left Arm
+            6: 'L Elbow',
+            7: 'L Shoulder Roll',
+            8: 'L Shoulder Pitch',
+            // Right Arm
+            11: 'R Elbow',
+            15: 'R Shoulder Roll',
+            16: 'R Shoulder Pitch',
+            // Left Leg
+            1: 'L Ankle Roll',
+            2: 'L Ankle Pitch',
+            3: 'L Knee',
+            4: 'L Hip Pitch',
+            5: 'L Hip Roll',
+            // Right Leg
+            9: 'R Ankle Roll',
+            10: 'R Ankle Pitch',
+            12: 'R Hip Pitch',
+            13: 'R Hip Roll',
+            14: 'R Knee',
+        };
+
+        // State
+        let ws = null;
+        let servos = {};
+        let msgTimes = [];
+        let animationId = null;
+
+        // Audio state
+        let audioContext = null;
+        let mediaStream = null;
+        let scriptProcessor = null;
+        let isListening = false;
+        let chunksSent = 0;
+        let audioChunkTimes = [];
+        let audioBuffer = [];
+        let currentLevel = 0;
+        let waveformData = new Float32Array(128);
+
+        // DOM elements
+        const canvas = document.getElementById('robot-canvas');
+        const ctx = canvas.getContext('2d');
+        const audioCanvas = document.getElementById('audio-canvas');
+        const audioCtx = audioCanvas.getContext('2d');
+        const timelineCanvas = document.getElementById('timeline-canvas');
+        const timelineCtx = timelineCanvas.getContext('2d');
+        const connectBtn = document.getElementById('connect-btn');
+        const micBtn = document.getElementById('mic-btn');
+        const micBtnText = document.getElementById('mic-btn-text');
+        const serverUrlInput = document.getElementById('server-url');
+        const connStatus = document.getElementById('conn-status');
+        const micStatus = document.getElementById('mic-status');
+        const serverFps = document.getElementById('server-fps');
+        const inferenceMs = document.getElementById('inference-ms');
+        const msgRate = document.getElementById('msg-rate');
+        const servoGrid = document.getElementById('servo-grid');
+        const logDiv = document.getElementById('log');
+        const rawFeed = document.getElementById('raw-feed');
+        const levelFill = document.getElementById('level-fill');
+        const audioLevelEl = document.getElementById('audio-level');
+        const chunksSentEl = document.getElementById('chunks-sent');
+        const audioRateEl = document.getElementById('audio-rate');
+
+        // Batch mode DOM elements
+        const progressText = document.getElementById('progress-text');
+        const progressFill = document.getElementById('progress-fill');
+        const progressDetails = document.getElementById('progress-details');
+        const uploadPrompt = document.getElementById('upload-prompt');
+
+        // Batch mode state
+        let danceData = null;
+        let audioElement = null;
+        let uploadedAudioFile = null;
+
+        // Raw message counter
+        let msgCount = 0;
+
+        // Detailed logs - send to local server
+        const LOG_SERVER = 'http://localhost:8766/log';
+        const LOG_CLEAR = 'http://localhost:8766/clear';
+        let logQueue = [];
+        let loggingEnabled = true;  // Always log
+
+        function addLog(type, data) {
+            // Always log now for debugging
+
+            const entry = {
+                time: Date.now(),
+                timeStr: new Date().toISOString(),
+                type: type,
+                data: data
+            };
+            logQueue.push(entry);
+        }
+
+        // Flush logs to server periodically
+        function flushLogs() {
+            if (logQueue.length === 0) return;
+
+            const toSend = logQueue.splice(0, 50);
+            fetch(LOG_SERVER, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batch: toSend })
+            }).catch(() => {});
+        }
+
+        // Clear logs on server
+        function clearLogs() {
+            logQueue = [];
+            fetch(LOG_CLEAR, { method: 'POST' }).catch(() => {});
+        }
+
+        // Start flushing logs every 500ms
+        setInterval(flushLogs, 500);
+
+        // Timeline tracking
+        const TIMELINE_WINDOW = 10000; // 10 seconds
+        let audioSendEvents = []; // {time: ms, chunkId: n}
+        let servoRecvEvents = []; // {time: ms, inferenceMs: n}
+        let firstAudioSendTime = null;
+        let firstServoRecvTime = null;
+        let estimatedLatency = null;
+
+        // Initialize servo grid
+        function initServoGrid() {
+            servoGrid.innerHTML = '';
+            for (const [id, name] of Object.entries(SERVO_NAMES)) {
+                const item = document.createElement('div');
+                item.className = 'servo-item';
+                item.innerHTML = `
+                    <div class="servo-name">${name} (${id})</div>
+                    <div class="servo-bar">
+                        <div id="servo-fill-${id}" class="servo-fill" style="width: 0%;"></div>
+                    </div>
+                    <div id="servo-val-${id}" class="servo-value">500</div>
+                `;
+                servoGrid.appendChild(item);
+            }
+        }
+
+        // Update servo display
+        function updateServoDisplay() {
+            for (const [id, value] of Object.entries(servos)) {
+                const fill = document.getElementById(`servo-fill-${id}`);
+                const val = document.getElementById(`servo-val-${id}`);
+                if (fill && val) {
+                    // Handle PWM values (range ~1000-2000, center ~1500) vs servo (0-1000, center 500)
+                    const isPWM = String(id).startsWith('pwm');
+                    const center = isPWM ? 1500 : 500;
+                    const range = isPWM ? 500 : 300;
+
+                    const deviation = value - center;
+                    const width = Math.min(100, Math.abs(deviation) / range * 100);
+                    fill.style.width = width + '%';
+                    fill.style.left = deviation < 0 ? (50 - width) + '%' : '50%';
+                    val.textContent = value;
+                }
+            }
+        }
+
+        // Log message
+        function log(msg, type = '') {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            while (logDiv.children.length > 50) {
+                logDiv.removeChild(logDiv.firstChild);
+            }
+        }
+
+        // Log raw server message
+        function logRawMessage(data, rawText) {
+            msgCount++;
+            const entry = document.createElement('div');
+            entry.className = 'raw-msg' + (data.type === 'servos' ? ' servo' : '');
+
+            const now = new Date();
+            const ts = now.toLocaleTimeString() + '.' + String(now.getMilliseconds()).padStart(3, '0');
+
+            let summary = '';
+            if (data.type === 'servos') {
+                const servoCount = Object.keys(data.servos || {}).length;
+                const servoVals = Object.entries(data.servos || {})
+                    .slice(0, 4)
+                    .map(([k, v]) => `${k}:${v}`)
+                    .join(' ');
+                summary = `${servoCount} servos [${servoVals}...] fps:${(data.fps || 0).toFixed(1)} inf:${data.inference_time_ms || 0}ms`;
+            } else {
+                summary = JSON.stringify(data).substring(0, 100);
+            }
+
+            entry.innerHTML = `<span class="timestamp">#${msgCount} ${ts}</span> <span class="type">${data.type}</span> <span class="data">${summary}</span>`;
+
+            rawFeed.appendChild(entry);
+            rawFeed.scrollTop = rawFeed.scrollHeight;
+
+            // Keep last 200 messages
+            while (rawFeed.children.length > 200) {
+                rawFeed.removeChild(rawFeed.firstChild);
+            }
+        }
+
+        // Draw audio waveform
+        function drawWaveform() {
+            const width = audioCanvas.width;
+            const height = audioCanvas.height;
+
+            audioCtx.fillStyle = '#1a1a25';
+            audioCtx.fillRect(0, 0, width, height);
+
+            if (!isListening) {
+                audioCtx.fillStyle = '#333';
+                audioCtx.font = '12px sans-serif';
+                audioCtx.textAlign = 'center';
+                audioCtx.fillText('Microphone off', width / 2, height / 2 + 4);
+                return;
+            }
+
+            // Draw waveform
+            audioCtx.strokeStyle = '#f472b6';
+            audioCtx.lineWidth = 2;
+            audioCtx.beginPath();
+
+            const sliceWidth = width / waveformData.length;
+            let x = 0;
+
+            for (let i = 0; i < waveformData.length; i++) {
+                const v = waveformData[i];
+                const y = (v + 1) / 2 * height;
+
+                if (i === 0) {
+                    audioCtx.moveTo(x, y);
+                } else {
+                    audioCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+
+            audioCtx.stroke();
+
+            // Draw center line
+            audioCtx.strokeStyle = '#333';
+            audioCtx.lineWidth = 1;
+            audioCtx.beginPath();
+            audioCtx.moveTo(0, height / 2);
+            audioCtx.lineTo(width, height / 2);
+            audioCtx.stroke();
+        }
+
+        // Draw robot stick figure
+        function drawRobot() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const centerX = canvas.width / 2;
+            const baseY = 150;
+
+            // Bus servos: range 0-1000, center 500
+            const pulse2angle = (pulse, scale = 1) => ((pulse || 500) - 500) / 300 * scale;
+            // PWM servos (head): range 500-2500, center 1500
+            const pwmPulse2angle = (pulse, scale = 1) => ((pulse || 1500) - 1500) / 300 * scale;
+
+            // Head uses PWM servos (pwm1, pwm2)
+            const headPitch = pwmPulse2angle(servos['pwm1'], 0.5);
+            const headYaw = pwmPulse2angle(servos['pwm2'], 0.5);
+            // Arms use bus servos (corrected mapping from tony_pro.py)
+            const lShoulderPitch = pulse2angle(servos[8]);   // ID 8 = L Shoulder Pitch
+            const lShoulderRoll = pulse2angle(servos[7]);    // ID 7 = L Shoulder Roll
+            const rShoulderPitch = pulse2angle(servos[16]);  // ID 16 = R Shoulder Pitch
+            const rShoulderRoll = pulse2angle(servos[15]);   // ID 15 = R Shoulder Roll
+            const lElbow = pulse2angle(servos[6]);           // ID 6 = L Elbow
+            const rElbow = pulse2angle(servos[11]);          // ID 11 = R Elbow
+
+            // Legs use bus servos (full body retargeting)
+            const lHipPitch = pulse2angle(servos[4]);        // ID 4 = L Hip Pitch
+            const lHipRoll = pulse2angle(servos[5]);         // ID 5 = L Hip Roll
+            const lKnee = pulse2angle(servos[3]);            // ID 3 = L Knee
+            const lAnklePitch = pulse2angle(servos[2]);      // ID 2 = L Ankle Pitch
+            const rHipPitch = pulse2angle(servos[12]);       // ID 12 = R Hip Pitch
+            const rHipRoll = pulse2angle(servos[13]);        // ID 13 = R Hip Roll
+            const rKnee = pulse2angle(servos[14]);           // ID 14 = R Knee
+            const rAnklePitch = pulse2angle(servos[10]);     // ID 10 = R Ankle Pitch
+
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'rgba(100, 150, 255, 0.5)';
+
+            const bodyColor = '#5588ff';
+            const jointColor = '#88aaff';
+
+            function drawLimb(x1, y1, x2, y2, thickness = 8) {
+                ctx.strokeStyle = bodyColor;
+                ctx.lineWidth = thickness;
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+
+            function drawJoint(x, y, radius = 10) {
+                ctx.fillStyle = jointColor;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // HEAD
+            const headSize = 45;
+            const headX = centerX + headYaw * 30;
+            const headY = baseY + headPitch * 20;
+
+            ctx.shadowBlur = 30;
+            ctx.fillStyle = bodyColor;
+            ctx.beginPath();
+            ctx.arc(headX, headY, headSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#111';
+            ctx.beginPath();
+            ctx.arc(headX - 15, headY - 5, 8, 0, Math.PI * 2);
+            ctx.arc(headX + 15, headY - 5, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#111';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(headX, headY + 5, 15, 0.2, Math.PI - 0.2);
+            ctx.stroke();
+
+            ctx.shadowBlur = 20;
+
+            // NECK
+            const neckY = baseY + headSize + 10;
+            drawLimb(centerX, neckY - 30, centerX, neckY, 12);
+
+            // TORSO
+            const shoulderY = neckY + 20;
+            const hipY = shoulderY + 150;
+            const shoulderWidth = 80;
+            const hipWidth = 50;
+
+            drawLimb(centerX, shoulderY, centerX, hipY, 14);
+            drawLimb(centerX - shoulderWidth, shoulderY, centerX + shoulderWidth, shoulderY, 12);
+            drawJoint(centerX - shoulderWidth, shoulderY, 12);
+            drawJoint(centerX + shoulderWidth, shoulderY, 12);
+
+            // LEFT ARM
+            const lShoulderX = centerX - shoulderWidth;
+            const lUpperArmLen = 70;
+            const lForearmLen = 60;
+
+            // Combine pitch (forward/back) and roll (sideways raise)
+            const lArmAngle = lShoulderPitch + lShoulderRoll * 0.5;
+            const lElbowX = lShoulderX - Math.sin(lArmAngle) * lUpperArmLen;
+            const lElbowY = shoulderY + Math.cos(lArmAngle) * lUpperArmLen - lShoulderRoll * 30;
+
+            const lElbowAngle = lArmAngle + lElbow * 0.8;
+            const lHandX = lElbowX - Math.sin(lElbowAngle) * lForearmLen;
+            const lHandY = lElbowY + Math.cos(lElbowAngle) * lForearmLen;
+
+            drawLimb(lShoulderX, shoulderY, lElbowX, lElbowY);
+            drawJoint(lElbowX, lElbowY, 8);
+            drawLimb(lElbowX, lElbowY, lHandX, lHandY);
+            drawJoint(lHandX, lHandY, 10);
+
+            // RIGHT ARM
+            const rShoulderX = centerX + shoulderWidth;
+            const rUpperArmLen = 70;
+            const rForearmLen = 60;
+
+            // Combine pitch (forward/back) and roll (sideways raise)
+            const rArmAngle = rShoulderPitch + rShoulderRoll * 0.5;
+            const rElbowX = rShoulderX + Math.sin(rArmAngle) * rUpperArmLen;
+            const rElbowY = shoulderY + Math.cos(rArmAngle) * rUpperArmLen - rShoulderRoll * 30;
+
+            const rElbowAngle = rArmAngle + rElbow * 0.8;
+            const rHandX = rElbowX + Math.sin(rElbowAngle) * rForearmLen;
+            const rHandY = rElbowY + Math.cos(rElbowAngle) * rForearmLen;
+
+            drawLimb(rShoulderX, shoulderY, rElbowX, rElbowY);
+            drawJoint(rElbowX, rElbowY, 8);
+            drawLimb(rElbowX, rElbowY, rHandX, rHandY);
+            drawJoint(rHandX, rHandY, 10);
+
+            // HIPS
+            drawLimb(centerX - hipWidth, hipY, centerX + hipWidth, hipY, 12);
+            drawJoint(centerX - hipWidth, hipY, 10);
+            drawJoint(centerX + hipWidth, hipY, 10);
+
+            // LEGS
+            const upperLegLen = 90;
+            const lowerLegLen = 80;
+
+            // LEFT LEG - uses lHipPitch, lHipRoll, lKnee, lAnklePitch
+            const lHipX = centerX - hipWidth;
+            const lLegAngle = lHipPitch + lHipRoll * 0.5;
+            const lKneeX = lHipX + Math.sin(lLegAngle) * upperLegLen - lHipRoll * 15;
+            const lKneeY = hipY + Math.cos(lLegAngle) * upperLegLen;
+
+            const lLowerLegAngle = lLegAngle + lKnee;
+            const lFootX = lKneeX + Math.sin(lLowerLegAngle) * lowerLegLen;
+            const lFootY = lKneeY + Math.cos(lLowerLegAngle) * lowerLegLen;
+
+            drawLimb(lHipX, hipY, lKneeX, lKneeY, 10);
+            drawJoint(lKneeX, lKneeY, 8);
+            drawLimb(lKneeX, lKneeY, lFootX, lFootY, 10);
+            drawJoint(lFootX, lFootY, 12);
+
+            // RIGHT LEG - uses rHipPitch, rHipRoll, rKnee, rAnklePitch
+            const rHipX = centerX + hipWidth;
+            const rLegAngle = rHipPitch + rHipRoll * 0.5;
+            const rKneeX = rHipX + Math.sin(rLegAngle) * upperLegLen + rHipRoll * 15;
+            const rKneeY = hipY + Math.cos(rLegAngle) * upperLegLen;
+
+            const rLowerLegAngle = rLegAngle + rKnee;
+            const rFootX = rKneeX + Math.sin(rLowerLegAngle) * lowerLegLen;
+            const rFootY = rKneeY + Math.cos(rLowerLegAngle) * lowerLegLen;
+
+            drawLimb(rHipX, hipY, rKneeX, rKneeY, 10);
+            drawJoint(rKneeX, rKneeY, 8);
+            drawLimb(rKneeX, rKneeY, rFootX, rFootY, 10);
+            drawJoint(rFootX, rFootY, 12);
+
+            // Floor shadow
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(80, 120, 255, 0.1)';
+            ctx.beginPath();
+            ctx.ellipse(centerX, canvas.height - 50, 150, 20, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Draw timeline graph
+        function drawTimeline() {
+            const width = timelineCanvas.width;
+            const height = timelineCanvas.height;
+            const now = Date.now();
+
+            // Clear
+            timelineCtx.fillStyle = '#0a0a10';
+            timelineCtx.fillRect(0, 0, width, height);
+
+            // Prune old events
+            audioSendEvents = audioSendEvents.filter(e => now - e.time < TIMELINE_WINDOW);
+            servoRecvEvents = servoRecvEvents.filter(e => now - e.time < TIMELINE_WINDOW);
+
+            // Draw grid
+            timelineCtx.strokeStyle = '#222';
+            timelineCtx.lineWidth = 1;
+            for (let i = 0; i <= 10; i++) {
+                const x = (i / 10) * width;
+                timelineCtx.beginPath();
+                timelineCtx.moveTo(x, 0);
+                timelineCtx.lineTo(x, height);
+                timelineCtx.stroke();
+            }
+
+            // Draw time labels
+            timelineCtx.fillStyle = '#444';
+            timelineCtx.font = '10px monospace';
+            timelineCtx.textAlign = 'center';
+            for (let i = 0; i <= 10; i++) {
+                const x = (i / 10) * width;
+                const secsAgo = ((10 - i) * TIMELINE_WINDOW / 10 / 1000).toFixed(0);
+                timelineCtx.fillText(`-${secsAgo}s`, x, height - 5);
+            }
+
+            // Draw labels
+            timelineCtx.textAlign = 'left';
+            timelineCtx.fillStyle = '#f472b6';
+            timelineCtx.fillText('AUDIO SENT', 10, 20);
+            timelineCtx.fillStyle = '#4ade80';
+            timelineCtx.fillText('SERVO RECV', 10, 55);
+            timelineCtx.fillStyle = '#60a5fa';
+            timelineCtx.fillText('INFERENCE TIME', 10, 90);
+
+            // Helper to map time to x
+            const timeToX = (t) => ((t - (now - TIMELINE_WINDOW)) / TIMELINE_WINDOW) * width;
+
+            // Draw audio send events (pink bars at top)
+            timelineCtx.fillStyle = '#f472b6';
+            for (const event of audioSendEvents) {
+                const x = timeToX(event.time);
+                if (x >= 0 && x <= width) {
+                    timelineCtx.fillRect(x, 25, 3, 15);
+                }
+            }
+
+            // Draw servo recv events (green bars in middle)
+            timelineCtx.fillStyle = '#4ade80';
+            for (const event of servoRecvEvents) {
+                const x = timeToX(event.time);
+                if (x >= 0 && x <= width) {
+                    timelineCtx.fillRect(x, 60, 3, 15);
+                }
+            }
+
+            // Draw inference times (blue line graph)
+            if (servoRecvEvents.length > 1) {
+                timelineCtx.strokeStyle = '#60a5fa';
+                timelineCtx.lineWidth = 2;
+                timelineCtx.beginPath();
+                let started = false;
+                for (const event of servoRecvEvents) {
+                    const x = timeToX(event.time);
+                    // Scale inference time: 0-500ms maps to 0-30px
+                    const y = 95 + Math.min(30, (event.inferenceMs || 0) / 500 * 30);
+                    if (x >= 0 && x <= width) {
+                        if (!started) {
+                            timelineCtx.moveTo(x, y);
+                            started = true;
+                        } else {
+                            timelineCtx.lineTo(x, y);
+                        }
+                    }
+                }
+                timelineCtx.stroke();
+            }
+
+            // Calculate and display latency estimate
+            // Latency = time from first audio send to first servo receive (initial buffer fill)
+            // Plus ongoing: gap between audio rate and servo rate
+            if (firstAudioSendTime && firstServoRecvTime && !estimatedLatency) {
+                estimatedLatency = firstServoRecvTime - firstAudioSendTime;
+            }
+
+            // Draw latency stats
+            timelineCtx.fillStyle = '#fff';
+            timelineCtx.textAlign = 'right';
+            timelineCtx.font = '12px monospace';
+
+            const audioRate = audioSendEvents.filter(e => now - e.time < 1000).length;
+            const servoRate = servoRecvEvents.filter(e => now - e.time < 1000).length;
+            const lastInference = servoRecvEvents.length > 0 ? servoRecvEvents[servoRecvEvents.length - 1].inferenceMs : 0;
+
+            timelineCtx.fillText(`Audio: ${audioRate}/s`, width - 10, 20);
+            timelineCtx.fillText(`Servo: ${servoRate}/s`, width - 10, 35);
+            timelineCtx.fillText(`Inference: ${lastInference}ms`, width - 10, 50);
+
+            if (estimatedLatency !== null) {
+                timelineCtx.fillStyle = '#fbbf24';
+                timelineCtx.fillText(`Initial Latency: ${(estimatedLatency / 1000).toFixed(1)}s`, width - 10, 70);
+            }
+
+            // Calculate backlog (how far behind is the server?)
+            const totalSent = audioSendEvents.length;
+            const totalRecv = servoRecvEvents.length;
+            const backlog = totalSent - totalRecv;
+
+            // Backlog indicator - if growing, we're sending too fast
+            timelineCtx.fillStyle = backlog > 20 ? '#ef4444' : backlog > 10 ? '#fbbf24' : '#4ade80';
+            timelineCtx.fillText(`Backlog: ${backlog} chunks`, width - 10, 85);
+
+            // Warn if backlog is growing
+            if (backlog > 30) {
+                timelineCtx.fillStyle = '#ef4444';
+                timelineCtx.fillText(`⚠ SERVER FALLING BEHIND`, width - 10, 100);
+            }
+
+            // Draw cumulative lines to show if server is keeping up
+            // Count events in buckets across the timeline
+            const bucketCount = 50;
+            const bucketWidth = TIMELINE_WINDOW / bucketCount;
+            const audioCounts = new Array(bucketCount).fill(0);
+            const servoCounts = new Array(bucketCount).fill(0);
+
+            for (const e of audioSendEvents) {
+                const bucket = Math.floor((e.time - (now - TIMELINE_WINDOW)) / bucketWidth);
+                if (bucket >= 0 && bucket < bucketCount) {
+                    for (let i = bucket; i < bucketCount; i++) audioCounts[i]++;
+                }
+            }
+            for (const e of servoRecvEvents) {
+                const bucket = Math.floor((e.time - (now - TIMELINE_WINDOW)) / bucketWidth);
+                if (bucket >= 0 && bucket < bucketCount) {
+                    for (let i = bucket; i < bucketCount; i++) servoCounts[i]++;
+                }
+            }
+
+            // Find max for scaling
+            const maxCount = Math.max(1, ...audioCounts, ...servoCounts);
+
+            // Draw cumulative audio line (pink, dashed)
+            timelineCtx.strokeStyle = '#f472b6';
+            timelineCtx.lineWidth = 2;
+            timelineCtx.setLineDash([4, 4]);
+            timelineCtx.beginPath();
+            for (let i = 0; i < bucketCount; i++) {
+                const x = (i / bucketCount) * width;
+                const y = 130 - (audioCounts[i] / maxCount) * 25;
+                if (i === 0) timelineCtx.moveTo(x, y);
+                else timelineCtx.lineTo(x, y);
+            }
+            timelineCtx.stroke();
+            timelineCtx.setLineDash([]);
+
+            // Draw cumulative servo line (green, solid)
+            timelineCtx.strokeStyle = '#4ade80';
+            timelineCtx.lineWidth = 2;
+            timelineCtx.beginPath();
+            for (let i = 0; i < bucketCount; i++) {
+                const x = (i / bucketCount) * width;
+                const y = 130 - (servoCounts[i] / maxCount) * 25;
+                if (i === 0) timelineCtx.moveTo(x, y);
+                else timelineCtx.lineTo(x, y);
+            }
+            timelineCtx.stroke();
+
+            // Pipeline explanation
+            timelineCtx.fillStyle = '#666';
+            timelineCtx.font = '10px sans-serif';
+            timelineCtx.textAlign = 'left';
+            timelineCtx.fillText('Dashed pink=cumulative sent | Solid green=cumulative received | Gap=backlog', 10, height - 20);
+        }
+
+        // Animation loop
+        function animate() {
+            drawRobot();
+            drawWaveform();
+            drawTimeline();
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // Update stats
+        let lastStatsLog = 0;
+        function updateStats() {
+            const now = Date.now();
+            msgTimes = msgTimes.filter(t => now - t < 1000);
+            msgRate.textContent = msgTimes.length;
+
+            audioChunkTimes = audioChunkTimes.filter(t => now - t < 1000);
+            audioRateEl.textContent = audioChunkTimes.length;
+            chunksSentEl.textContent = chunksSent;
+
+            // Log stats every 2 seconds
+            if (isListening && now - lastStatsLog > 2000) {
+                lastStatsLog = now;
+                addLog('STATS', {
+                    audioSendRate: audioChunkTimes.length,
+                    servoRecvRate: msgTimes.length,
+                    totalAudioSent: audioSendEvents.length,
+                    totalServoRecv: servoRecvEvents.length,
+                    backlog: audioSendEvents.length - servoRecvEvents.length,
+                    sessionMs: firstAudioSendTime ? (now - firstAudioSendTime) : 0
+                });
+            }
+        }
+
+        // Resample audio to target sample rate
+        function resample(audioData, fromRate, toRate) {
+            if (fromRate === toRate) return audioData;
+
+            const ratio = fromRate / toRate;
+            const newLength = Math.round(audioData.length / ratio);
+            const result = new Float32Array(newLength);
+
+            for (let i = 0; i < newLength; i++) {
+                const srcIndex = i * ratio;
+                const srcIndexFloor = Math.floor(srcIndex);
+                const srcIndexCeil = Math.min(srcIndexFloor + 1, audioData.length - 1);
+                const t = srcIndex - srcIndexFloor;
+                result[i] = audioData[srcIndexFloor] * (1 - t) + audioData[srcIndexCeil] * t;
+            }
+
+            return result;
+        }
+
+        // Start microphone
+        async function startMicrophone() {
+            try {
+                log('Requesting microphone access...', 'audio');
+
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                // Create audio context (use browser's native rate, we'll resample)
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                // Use ScriptProcessor for raw audio access (deprecated but widely supported)
+                const bufferSize = 4096;
+                scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+                scriptProcessor.onaudioprocess = (e) => {
+                    if (!isListening || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                    const inputData = e.inputBuffer.getChannelData(0);
+
+                    // Update waveform display
+                    const step = Math.floor(inputData.length / waveformData.length);
+                    for (let i = 0; i < waveformData.length; i++) {
+                        waveformData[i] = inputData[i * step] || 0;
+                    }
+
+                    // Calculate level
+                    let sum = 0;
+                    for (let i = 0; i < inputData.length; i++) {
+                        sum += inputData[i] * inputData[i];
+                    }
+                    const rms = Math.sqrt(sum / inputData.length);
+                    const db = 20 * Math.log10(rms + 0.0001);
+                    currentLevel = Math.max(-60, Math.min(0, db));
+
+                    // Update level display
+                    const levelPercent = ((currentLevel + 60) / 60) * 100;
+                    levelFill.style.width = levelPercent + '%';
+                    audioLevelEl.textContent = currentLevel.toFixed(0);
+
+                    // Resample to target rate
+                    const resampled = resample(inputData, audioContext.sampleRate, SAMPLE_RATE);
+
+                    // Add to buffer
+                    audioBuffer.push(...resampled);
+
+                    // Send chunks when we have enough
+                    while (audioBuffer.length >= CHUNK_SIZE) {
+                        const chunk = audioBuffer.splice(0, CHUNK_SIZE);
+
+                        // Send to server with sequence ID
+                        const seqId = chunksSent + 1;
+                        const msg = {
+                            type: 'audio',
+                            audio: Array.from(chunk),
+                            timestamp: Date.now() / 1000,
+                            seq: seqId  // Add sequence ID to track
+                        };
+                        ws.send(JSON.stringify(msg));
+
+                        const sendTime = Date.now();
+                        chunksSent++;
+                        audioChunkTimes.push(sendTime);
+
+                        // Track for timeline
+                        audioSendEvents.push({ time: sendTime, chunkId: chunksSent });
+                        addLog('AUDIO_SENT', {
+                            seq: seqId,
+                            sentAt: sendTime,
+                            rms: rms.toFixed(4),
+                            samples: chunk.length,
+                            totalSent: chunksSent,
+                            pendingResponses: chunksSent - servoRecvEvents.length
+                        });
+
+                        if (!firstAudioSendTime) {
+                            firstAudioSendTime = sendTime;
+                            log('First audio chunk sent - starting latency measurement', 'info');
+                            addLog('FIRST_AUDIO', { time: sendTime });
+                        }
+
+                        // Log every 10th chunk sent
+                        if (chunksSent % 10 === 0) {
+                            const entry = document.createElement('div');
+                            entry.className = 'raw-msg';
+                            entry.innerHTML = `<span class="timestamp">SENT #${chunksSent}</span> <span class="type">audio</span> <span class="data">${chunk.length} samples, rms=${rms.toFixed(4)}</span>`;
+                            rawFeed.appendChild(entry);
+                        }
+                    }
+                };
+
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                isListening = true;
+                micBtn.classList.add('listening');
+                micBtnText.textContent = 'Stop Listening';
+                micStatus.textContent = 'Streaming';
+                micStatus.className = 'status-value listening';
+
+                // Reset timeline tracking for fresh latency measurement
+                audioSendEvents = [];
+                servoRecvEvents = [];
+                firstAudioSendTime = null;
+                firstServoRecvTime = null;
+                estimatedLatency = null;
+                chunksSent = 0;
+
+                log(`Microphone started (${audioContext.sampleRate}Hz -> ${SAMPLE_RATE}Hz)`, 'success');
+
+            } catch (err) {
+                log(`Microphone error: ${err.message}`, 'error');
+                console.error('Microphone error:', err);
+            }
+        }
+
+        // Stop microphone
+        function stopMicrophone() {
+            isListening = false;
+
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor = null;
+            }
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            audioBuffer = [];
+            waveformData = new Float32Array(128);
+            levelFill.style.width = '0%';
+            audioLevelEl.textContent = '0';
+
+            micBtn.classList.remove('listening');
+            micBtnText.textContent = 'Start Listening';
+            micStatus.textContent = 'Off';
+            micStatus.className = 'status-value disconnected';
+
+            log('Microphone stopped', 'audio');
+        }
+
+        // Batch message handler - wraps existing onmessage to add batch support
+        function setupBatchMessageHandler() {
+            if (!ws) return;
+
+            const existingHandler = ws.onmessage;
+            ws.onmessage = (event) => {
+                // Call existing handler first
+                if (existingHandler) {
+                    existingHandler(event);
+                }
+
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Received message:', data.type, data);
+
+                    // Handle batch progress updates
+                    if (data.type === 'progress') {
+                        const stage = data.stage || '';
+                        console.log('Progress update:', stage, data);
+
+                        if (stage === 'features') {
+                            progressText.textContent = 'Extracting audio features...';
+                            progressDetails.textContent = 'This may take a moment for longer songs';
+                            progressFill.style.width = '25%';
+                        } else if (stage === 'features_done') {
+                            progressText.textContent = `Extracted ${data.feature_frames} audio frames`;
+                            progressDetails.textContent = 'Starting motion generation...';
+                            progressFill.style.width = '35%';
+                        } else if (stage === 'generating') {
+                            const done = data.frames_done || 0;
+                            const total = data.total_frames || 1;
+                            const pct = Math.round(35 + (done / total) * 55);
+                            progressFill.style.width = pct + '%';
+                            progressText.textContent = `Generating motion: ${done} / ${total} frames`;
+                            if (data.eta_seconds !== undefined) {
+                                progressDetails.textContent = `${data.fps || 0} fps | ETA: ${data.eta_seconds}s remaining`;
+                            }
+                        } else if (stage === 'converting') {
+                            progressText.textContent = 'Converting to servo commands...';
+                            progressDetails.textContent = 'Almost done!';
+                            progressFill.style.width = '95%';
+                        }
+                    }
+
+                    // Handle batch result
+                    if (data.type === 'batch_result') {
+                        console.log('Batch result received:', data);
+                        progressText.textContent = 'Complete!';
+                        progressFill.style.width = '100%';
+                        progressDetails.textContent = `${data.n_frames} frames, ${data.duration_seconds.toFixed(1)}s dance`;
+
+                        log(`Dance generated: ${data.n_frames} frames in ${data.generation_time_seconds}s`, 'success');
+
+                        // Store dance data
+                        danceData = data;
+
+                        // Create audio element for playback
+                        if (uploadedAudioFile) {
+                            audioElement = new Audio(URL.createObjectURL(uploadedAudioFile));
+                        }
+
+                        // Show playback panel
+                        if (typeof showPlaybackPanel === 'function') {
+                            showPlaybackPanel();
+                        }
+
+                        // Reset upload UI after a moment
+                        setTimeout(() => {
+                            uploadPrompt.style.display = 'block';
+                            document.getElementById('upload-progress').style.display = 'none';
+                        }, 2000);
+                    }
+
+                    // Handle cancellation
+                    if (data.type === 'cancelled') {
+                        console.log('Job cancelled:', data);
+                        progressText.textContent = 'Cancelled';
+                        progressDetails.textContent = 'Starting new file...';
+                        progressFill.style.width = '0%';
+                        log('Previous job cancelled', 'info');
+                    }
+
+                    // Handle errors
+                    if (data.type === 'error') {
+                        console.error('Server error:', data);
+                        progressText.textContent = 'Error!';
+                        progressDetails.textContent = data.message || 'Unknown error';
+                        progressFill.style.width = '0%';
+                        progressFill.style.background = '#ef4444';
+                        log(`Server error: ${data.message}`, 'error');
+
+                        setTimeout(() => {
+                            uploadPrompt.style.display = 'block';
+                            document.getElementById('upload-progress').style.display = 'none';
+                            progressFill.style.background = '';
+                        }, 3000);
+                    }
+                } catch (e) {
+                    // Not JSON or parse error
+                    console.log('Non-JSON message or parse error:', e);
+                }
+            };
+
+            console.log('Batch message handler installed');
+        }
+
+        // Connect to WebSocket
+        function connect() {
+            const url = serverUrlInput.value.trim();
+            if (!url) {
+                log('Please enter a WebSocket URL', 'error');
+                return;
+            }
+
+            log(`Connecting to ${url}...`, 'info');
+            connectBtn.disabled = true;
+
+            try {
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    log('Connected!', 'success');
+                    connStatus.textContent = 'Connected';
+                    connStatus.className = 'status-value connected';
+                    connectBtn.textContent = 'Disconnect';
+                    connectBtn.classList.add('connected');
+                    connectBtn.disabled = false;
+                    micBtn.disabled = false;
+
+                    // Update upload status
+                    const uploadStatus = document.getElementById('upload-status');
+                    if (uploadStatus) {
+                        uploadStatus.textContent = '✓ Ready - drop a file to generate dance';
+                        uploadStatus.style.color = '#4ade80';
+                    }
+
+                    ws.send(JSON.stringify({ type: 'status' }));
+
+                    // Setup batch mode handler
+                    setupBatchMessageHandler();
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+
+                        // Log ALL raw messages
+                        logRawMessage(data, event.data);
+
+                        if (data.type === 'servos') {
+                            const recvTime = Date.now();
+                            servos = data.servos;
+                            updateServoDisplay();
+                            if (data.fps) serverFps.textContent = data.fps.toFixed(1);
+                            if (data.inference_time_ms) inferenceMs.textContent = data.inference_time_ms + 'ms';
+                            msgTimes.push(recvTime);
+
+                            // Track for timeline
+                            servoRecvEvents.push({ time: recvTime, inferenceMs: data.inference_time_ms || 0 });
+                            // Calculate timing relative to audio sends
+                            const servoNum = servoRecvEvents.length;
+                            const correspondingAudioIdx = Math.min(servoNum, audioSendEvents.length - 1);
+                            const correspondingAudio = audioSendEvents[correspondingAudioIdx];
+                            const estimatedRoundTrip = correspondingAudio ? (recvTime - correspondingAudio.time) : null;
+
+                            addLog('SERVO_RECV', {
+                                recvAt: recvTime,
+                                servoNum: servoNum,
+                                servos: data.servos,
+                                fps: data.fps,
+                                inferenceMs: data.inference_time_ms,
+                                serverSeq: data.seq,  // Check if server echoes back
+                                backlog: audioSendEvents.length - servoRecvEvents.length,
+                                // Timing analysis
+                                estimatedInputIdx: correspondingAudioIdx,
+                                estimatedInputTime: correspondingAudio ? correspondingAudio.time : null,
+                                estimatedRoundTripMs: estimatedRoundTrip
+                            });
+
+                            if (!firstServoRecvTime && firstAudioSendTime) {
+                                firstServoRecvTime = recvTime;
+                                const latency = firstServoRecvTime - firstAudioSendTime;
+                                log(`First servo received! Initial latency: ${(latency/1000).toFixed(2)}s`, 'success');
+                                addLog('FIRST_SERVO', { time: recvTime, latencyMs: latency });
+                            }
+                        } else if (data.type === 'status' || data.type === 'pong') {
+                            log(`Server: buffer=${data.feature_buffer || 0}/240, motion=${data.motion_buffer || 0}/120`, 'info');
+                        }
+                    } catch (e) {
+                        console.error('Parse error:', e);
+                        // Log unparseable messages too
+                        const entry = document.createElement('div');
+                        entry.className = 'raw-msg';
+                        entry.innerHTML = `<span class="timestamp">ERR</span> <span class="data">${event.data.substring(0, 200)}</span>`;
+                        rawFeed.appendChild(entry);
+                    }
+                };
+
+                ws.onclose = () => {
+                    log('Disconnected', 'error');
+                    connStatus.textContent = 'Disconnected';
+                    connStatus.className = 'status-value disconnected';
+                    connectBtn.textContent = 'Connect';
+                    connectBtn.classList.remove('connected');
+                    connectBtn.disabled = false;
+                    micBtn.disabled = true;
+                    ws = null;
+
+                    // Update upload status
+                    const uploadStatus = document.getElementById('upload-status');
+                    if (uploadStatus) {
+                        uploadStatus.textContent = '⚠ Connect to server first';
+                        uploadStatus.style.color = '#f87171';
+                    }
+
+                    if (isListening) {
+                        stopMicrophone();
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log('Connection error', 'error');
+                    console.error('WebSocket error:', error);
+                };
+
+            } catch (e) {
+                log(`Error: ${e.message}`, 'error');
+                connectBtn.disabled = false;
+            }
+        }
+
+        // Disconnect
+        function disconnect() {
+            if (isListening) {
+                stopMicrophone();
+            }
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        // Button handlers
+        connectBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                disconnect();
+            } else {
+                connect();
+            }
+        });
+
+        micBtn.addEventListener('click', () => {
+            if (isListening) {
+                addLog('MIC_STOP', { totalSent: audioSendEvents.length, totalRecv: servoRecvEvents.length });
+                flushLogs();  // Flush remaining logs
+                loggingEnabled = false;
+                stopMicrophone();
+            } else {
+                clearLogs();  // Clear old logs
+                loggingEnabled = true;
+                addLog('MIC_START', { timestamp: Date.now() });
+                startMicrophone();
+            }
+        });
+
+        // Download logs button
+        document.getElementById('download-logs-btn').addEventListener('click', () => {
+            // Add summary stats to the log
+            const summary = {
+                type: 'SUMMARY',
+                totalAudioSent: audioSendEvents.length,
+                totalServoRecv: servoRecvEvents.length,
+                backlog: audioSendEvents.length - servoRecvEvents.length,
+                estimatedLatencyMs: estimatedLatency,
+                sessionDuration: firstAudioSendTime ? (Date.now() - firstAudioSendTime) : 0
+            };
+
+            const logData = {
+                exportTime: new Date().toISOString(),
+                summary: summary,
+                logs: detailedLogs
+            };
+
+            const blob = new Blob([JSON.stringify(logData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `fact-dance-logs-${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            log('Logs downloaded!', 'success');
+        });
+
+        // Set canvas size for audio waveform
+        function resizeAudioCanvas() {
+            const rect = audioCanvas.getBoundingClientRect();
+            audioCanvas.width = rect.width * window.devicePixelRatio;
+            audioCanvas.height = rect.height * window.devicePixelRatio;
+            audioCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+
+        // Set canvas size for timeline
+        function resizeTimelineCanvas() {
+            const rect = timelineCanvas.getBoundingClientRect();
+            timelineCanvas.width = rect.width * window.devicePixelRatio;
+            timelineCanvas.height = rect.height * window.devicePixelRatio;
+            timelineCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+
+        // Initialize
+        initServoGrid();
+        resizeAudioCanvas();
+        resizeTimelineCanvas();
+        window.addEventListener('resize', () => {
+            resizeAudioCanvas();
+            resizeTimelineCanvas();
+        });
+        animate();
+        setInterval(updateStats, 100);
+
+        log('Ready - Connect to server, then start microphone', 'info');
+
+        // Test log on page load
+        addLog('PAGE_LOAD', { userAgent: navigator.userAgent });
+        setTimeout(flushLogs, 1000);  // Flush after 1 sec
+
+        // ============================================================
+        // BATCH MODE - File upload and dance playback
+        // ============================================================
+
+        // DOM elements for batch mode
+        const dropZone = document.getElementById('drop-zone');
+        const audioFileInput = document.getElementById('audio-file');
+        const browseLink = document.getElementById('browse-link');
+        const uploadProgress = document.getElementById('upload-progress');
+        const loadDanceBtn = document.getElementById('load-dance-btn');
+        const danceFileInput = document.getElementById('dance-file');
+        const playbackPanel = document.getElementById('playback-panel');
+        const danceInfo = document.getElementById('dance-info');
+        const playBtn = document.getElementById('play-btn');
+        const playbackSlider = document.getElementById('playback-slider');
+        const currentTimeEl = document.getElementById('current-time');
+        const totalTimeEl = document.getElementById('total-time');
+        const downloadDanceBtn = document.getElementById('download-dance-btn');
+
+        // Playback state
+        let isPlaying = false;
+        let playbackFrame = 0;
+        let playbackStartTime = 0;
+        let playbackAnimationId = null;
+
+        // Format time as M:SS
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        // File upload handlers
+        browseLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            audioFileInput.click();
+        });
+
+        dropZone.addEventListener('click', (e) => {
+            // Don't double-trigger if clicking the browse link
+            if (!e.target.closest('#browse-link') && e.target.id !== 'browse-link') {
+                audioFileInput.click();
+            }
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('audio/')) {
+                handleAudioUpload(file);
+            }
+        });
+
+        audioFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleAudioUpload(file);
+            }
+        });
+
+        // Handle audio file upload for batch processing
+        async function handleAudioUpload(file) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Please click "Connect" first to connect to the server!');
+                log('Connect to server first!', 'error');
+                return;
+            }
+
+            uploadedAudioFile = file;
+            const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+            log(`Uploading ${file.name} (${sizeMB} MB)...`, 'info');
+            console.log('Starting upload:', file.name, sizeMB, 'MB');
+
+            // Show progress UI
+            uploadPrompt.style.display = 'none';
+            uploadProgress.style.display = 'block';
+            progressText.textContent = 'Uploading to server...';
+            progressFill.style.width = '10%';
+            progressFill.style.background = 'linear-gradient(90deg, #3b82f6, #8b5cf6)';
+            progressDetails.textContent = `${file.name} (${sizeMB} MB)`;
+
+            try {
+                // Read file as ArrayBuffer and send as binary
+                const arrayBuffer = await file.arrayBuffer();
+                console.log('Sending', arrayBuffer.byteLength, 'bytes to server...');
+                ws.send(arrayBuffer);
+
+                progressText.textContent = 'Sent! Waiting for server...';
+                progressFill.style.width = '20%';
+                log('File sent to server, waiting for processing...', 'info');
+            } catch (err) {
+                console.error('Upload error:', err);
+                progressText.textContent = 'Upload failed!';
+                progressDetails.textContent = err.message;
+                progressFill.style.background = '#ef4444';
+                log(`Upload error: ${err.message}`, 'error');
+            }
+        }
+
+        // Load dance JSON file
+        loadDanceBtn.addEventListener('click', () => {
+            danceFileInput.click();
+        });
+
+        danceFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                danceData = JSON.parse(text);
+                log(`Loaded dance: ${danceData.n_frames} frames, ${danceData.fps} fps`, 'success');
+
+                // Check if there's an associated audio file
+                if (danceData.audio_file) {
+                    log(`Dance references audio: ${danceData.audio_file}`, 'info');
+                }
+
+                showPlaybackPanel();
+            } catch (err) {
+                log(`Error loading JSON: ${err.message}`, 'error');
+            }
+        });
+
+        // Show playback panel with dance info
+        function showPlaybackPanel() {
+            if (!danceData) return;
+
+            playbackPanel.style.display = 'block';
+            const duration = danceData.duration_seconds || (danceData.n_frames / (danceData.fps || 60));
+
+            danceInfo.innerHTML = `
+                <div><strong>${danceData.n_frames}</strong> frames @ ${danceData.fps} fps</div>
+                <div>Duration: <strong>${formatTime(duration)}</strong></div>
+                ${danceData.audio_file ? `<div>Audio: ${danceData.audio_file}</div>` : ''}
+            `;
+
+            totalTimeEl.textContent = formatTime(duration);
+            playbackSlider.max = danceData.n_frames - 1;
+            playbackSlider.value = 0;
+            playbackFrame = 0;
+            updatePlaybackTime();
+
+            // Reset audio status if no audio loaded yet
+            if (!audioElement) {
+                const audioStatus = document.getElementById('audio-status');
+                audioStatus.textContent = 'No audio loaded - click Load Audio';
+                audioStatus.style.color = '#666';
+            }
+        }
+
+        // Update playback time display
+        function updatePlaybackTime() {
+            if (!danceData) return;
+            const fps = danceData.fps || 60;
+            const currentSec = playbackFrame / fps;
+            currentTimeEl.textContent = formatTime(currentSec);
+        }
+
+        // Play/pause button
+        playBtn.addEventListener('click', () => {
+            if (isPlaying) {
+                stopPlayback();
+            } else {
+                startPlayback();
+            }
+        });
+
+        // Playback slider
+        playbackSlider.addEventListener('input', (e) => {
+            playbackFrame = parseInt(e.target.value);
+            updatePlaybackTime();
+
+            // Update robot display
+            if (danceData && danceData.frames[playbackFrame]) {
+                servos = danceData.frames[playbackFrame].servos;
+                updateServoDisplay();
+            }
+
+            // Sync audio if playing
+            if (audioElement && isPlaying) {
+                const fps = danceData.fps || 60;
+                audioElement.currentTime = playbackFrame / fps;
+            }
+        });
+
+        // Start playback
+        function startPlayback() {
+            if (!danceData || isPlaying) return;
+
+            isPlaying = true;
+            playBtn.textContent = '⏸ Pause';
+            playBtn.classList.add('listening');
+
+            // Start audio if available
+            if (audioElement) {
+                const fps = danceData.fps || 60;
+                audioElement.currentTime = playbackFrame / fps;
+                audioElement.play();
+            }
+
+            playbackStartTime = performance.now() - (playbackFrame / (danceData.fps || 60) * 1000);
+
+            // Animation loop for playback
+            function playbackLoop() {
+                if (!isPlaying) return;
+
+                const elapsed = performance.now() - playbackStartTime;
+                const fps = danceData.fps || 60;
+                const targetFrame = Math.floor(elapsed / 1000 * fps);
+
+                if (targetFrame >= danceData.n_frames) {
+                    // End of dance
+                    stopPlayback();
+                    playbackFrame = 0;
+                    playbackSlider.value = 0;
+                    updatePlaybackTime();
+                    return;
+                }
+
+                if (targetFrame !== playbackFrame) {
+                    playbackFrame = targetFrame;
+                    playbackSlider.value = playbackFrame;
+                    updatePlaybackTime();
+
+                    // Update robot with frame data
+                    if (danceData.frames[playbackFrame]) {
+                        servos = danceData.frames[playbackFrame].servos;
+                        updateServoDisplay();
+                    }
+                }
+
+                playbackAnimationId = requestAnimationFrame(playbackLoop);
+            }
+
+            playbackLoop();
+            log('Playback started', 'info');
+        }
+
+        // Stop playback
+        function stopPlayback() {
+            isPlaying = false;
+            playBtn.textContent = '▶ Play';
+            playBtn.classList.remove('listening');
+
+            if (audioElement) {
+                audioElement.pause();
+            }
+
+            if (playbackAnimationId) {
+                cancelAnimationFrame(playbackAnimationId);
+                playbackAnimationId = null;
+            }
+
+            log('Playback stopped', 'info');
+        }
+
+        // Download dance JSON
+        downloadDanceBtn.addEventListener('click', () => {
+            if (!danceData) return;
+
+            const blob = new Blob([JSON.stringify(danceData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `dance_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            log('Dance JSON downloaded', 'success');
+        });
+
+        // Load audio file for playback
+        function loadAudioForPlayback(file) {
+            if (audioElement) {
+                audioElement.pause();
+                URL.revokeObjectURL(audioElement.src);
+            }
+            audioElement = new Audio(URL.createObjectURL(file));
+
+            // Update status when audio is loaded
+            audioElement.addEventListener('loadedmetadata', () => {
+                const duration = audioElement.duration;
+                const audioStatus = document.getElementById('audio-status');
+                audioStatus.textContent = `Audio: ${file.name} (${formatTime(duration)})`;
+                audioStatus.style.color = '#4ade80';
+            });
+
+            log(`Audio loaded: ${file.name}`, 'success');
+        }
+
+        // Audio load button handler
+        const loadAudioBtn = document.getElementById('load-audio-btn');
+        const playbackAudioFile = document.getElementById('playback-audio-file');
+
+        loadAudioBtn.addEventListener('click', () => {
+            playbackAudioFile.click();
+        });
+
+        playbackAudioFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                loadAudioForPlayback(file);
+            }
+        });
+    </script>
+</body>
+</html>

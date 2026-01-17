@@ -298,37 +298,45 @@ SMPL_JOINTS = [
 
 # Mapping from Tony Pro joints to SMPL joints
 RETARGET_MAP = {
-    # Head (PWM servos)
-    'head_pitch': {'servo_id': 'pwm1', 'smpl_joint': 'head', 'axis': 0, 'scale': 1.0, 'min': 1200, 'max': 1800, 'center': 1500},
-    'head_yaw': {'servo_id': 'pwm2', 'smpl_joint': 'head', 'axis': 1, 'scale': 1.0, 'min': 1200, 'max': 1800, 'center': 1500},
+    # Head (PWM servos - full FACT output - no restrictions)
+    'head_pitch': {'servo_id': 'pwm1', 'smpl_joint': 'head', 'axis': 0, 'scale': 1.0, 'min': 500, 'max': 2500, 'center': 1500},
+    'head_yaw': {'servo_id': 'pwm2', 'smpl_joint': 'head', 'axis': 1, 'scale': 1.0, 'min': 500, 'max': 2500, 'center': 1500},
 
-    # Left arm
-    'l_shoulder_pitch': {'servo_id': SERVO.L_SHOULDER_PITCH, 'smpl_joint': 'l_shoulder', 'axis': 0, 'scale': 1.0, 'min': 200, 'max': 800, 'center': 500},
-    'l_shoulder_roll': {'servo_id': SERVO.L_SHOULDER_ROLL, 'smpl_joint': 'l_shoulder', 'axis': 2, 'scale': 1.0, 'min': 200, 'max': 800, 'center': 500},
-    'l_elbow_pitch': {'servo_id': SERVO.L_ELBOW, 'smpl_joint': 'l_elbow', 'axis': 0, 'scale': -1.0, 'min': 200, 'max': 800, 'center': 500},
+    # Left arm (full FACT output - no restrictions)
+    'l_shoulder_pitch': {'servo_id': SERVO.L_SHOULDER_PITCH, 'smpl_joint': 'l_shoulder', 'axis': 0, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'l_shoulder_roll': {'servo_id': SERVO.L_SHOULDER_ROLL, 'smpl_joint': 'l_shoulder', 'axis': 2, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'l_elbow_pitch': {'servo_id': SERVO.L_ELBOW, 'smpl_joint': 'l_elbow', 'axis': 0, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
 
-    # Right arm
-    'r_shoulder_pitch': {'servo_id': SERVO.R_SHOULDER_PITCH, 'smpl_joint': 'r_shoulder', 'axis': 0, 'scale': -1.0, 'min': 200, 'max': 800, 'center': 500},
-    'r_shoulder_roll': {'servo_id': SERVO.R_SHOULDER_ROLL, 'smpl_joint': 'r_shoulder', 'axis': 2, 'scale': -1.0, 'min': 200, 'max': 800, 'center': 500},
-    'r_elbow_pitch': {'servo_id': SERVO.R_ELBOW, 'smpl_joint': 'r_elbow', 'axis': 0, 'scale': 1.0, 'min': 200, 'max': 800, 'center': 500},
+    # Right arm (full FACT output - no restrictions)
+    'r_shoulder_pitch': {'servo_id': SERVO.R_SHOULDER_PITCH, 'smpl_joint': 'r_shoulder', 'axis': 0, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'r_shoulder_roll': {'servo_id': SERVO.R_SHOULDER_ROLL, 'smpl_joint': 'r_shoulder', 'axis': 2, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'r_elbow_pitch': {'servo_id': SERVO.R_ELBOW, 'smpl_joint': 'r_elbow', 'axis': 0, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
 
-    # Left leg (scaled down for safety)
-    'l_hip_pitch': {'servo_id': SERVO.L_HIP_PITCH, 'smpl_joint': 'l_hip', 'axis': 0, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
-    'l_hip_roll': {'servo_id': SERVO.L_HIP_ROLL, 'smpl_joint': 'l_hip', 'axis': 2, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
-    'l_knee_pitch': {'servo_id': SERVO.L_KNEE, 'smpl_joint': 'l_knee', 'axis': 0, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
-    'l_ankle_pitch': {'servo_id': SERVO.L_ANKLE_PITCH, 'smpl_joint': 'l_ankle', 'axis': 0, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
+    # Left leg (full FACT output - no restrictions)
+    'l_hip_pitch': {'servo_id': SERVO.L_HIP_PITCH, 'smpl_joint': 'l_hip', 'axis': 0, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'l_hip_roll': {'servo_id': SERVO.L_HIP_ROLL, 'smpl_joint': 'l_hip', 'axis': 2, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'l_knee_pitch': {'servo_id': SERVO.L_KNEE, 'smpl_joint': 'l_knee', 'axis': 0, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'l_ankle_pitch': {'servo_id': SERVO.L_ANKLE_PITCH, 'smpl_joint': 'l_ankle', 'axis': 0, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'l_ankle_roll': {'servo_id': SERVO.L_ANKLE_ROLL, 'smpl_joint': 'l_ankle', 'axis': 2, 'scale': 1.0, 'min': 0, 'max': 1000, 'center': 500},
 
-    # Right leg
-    'r_hip_pitch': {'servo_id': SERVO.R_HIP_PITCH, 'smpl_joint': 'r_hip', 'axis': 0, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
-    'r_hip_roll': {'servo_id': SERVO.R_HIP_ROLL, 'smpl_joint': 'r_hip', 'axis': 2, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
-    'r_ankle_pitch': {'servo_id': SERVO.R_ANKLE_PITCH, 'smpl_joint': 'r_ankle', 'axis': 0, 'scale': 0.3, 'min': 400, 'max': 600, 'center': 500},
+    # Right leg (full FACT output - no restrictions)
+    'r_hip_pitch': {'servo_id': SERVO.R_HIP_PITCH, 'smpl_joint': 'r_hip', 'axis': 0, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'r_hip_roll': {'servo_id': SERVO.R_HIP_ROLL, 'smpl_joint': 'r_hip', 'axis': 2, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'r_knee_pitch': {'servo_id': 14, 'smpl_joint': 'r_knee', 'axis': 0, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'r_ankle_pitch': {'servo_id': SERVO.R_ANKLE_PITCH, 'smpl_joint': 'r_ankle', 'axis': 0, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
+    'r_ankle_roll': {'servo_id': SERVO.R_ANKLE_ROLL, 'smpl_joint': 'r_ankle', 'axis': 2, 'scale': -1.0, 'min': 0, 'max': 1000, 'center': 500},
 }
 
-# Active servos for retargeting (start with upper body only for safety)
+# Active servos for retargeting (full body with safety scaling)
 ACTIVE_RETARGET_JOINTS = [
+    # Head
+    'head_pitch', 'head_yaw',
+    # Arms (full range)
     'l_shoulder_pitch', 'l_shoulder_roll', 'l_elbow_pitch',
     'r_shoulder_pitch', 'r_shoulder_roll', 'r_elbow_pitch',
-    'head_pitch', 'head_yaw',
+    # Legs (conservative scaling to prevent falls)
+    'l_hip_pitch', 'l_hip_roll', 'l_knee_pitch', 'l_ankle_pitch', 'l_ankle_roll',
+    'r_hip_pitch', 'r_hip_roll', 'r_knee_pitch', 'r_ankle_pitch', 'r_ankle_roll',
 ]
 
 

@@ -2,8 +2,7 @@
 """
 FACT Dance Server - Runs on GPU cloud (H100/A100).
 
-Receives audio stream via WebSocket, runs FACT model,
-returns servo commands in real-time.
+Receives audio file via WebSocket, runs FACT model, returns servo commands.
 
 Usage:
     python fact_server.py --port 8765
@@ -12,9 +11,11 @@ Deploy to cloud with GPU for real-time performance.
 """
 
 import asyncio
+import base64
 import json
 import os
 import sys
+import tempfile
 import time
 import argparse
 import numpy as np
@@ -25,149 +26,31 @@ import websockets
 # Add mint to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'mint'))
 
-# Audio processing
-from scipy import signal
-from scipy.fftpack import dct
-
-# FACT model
 import tensorflow as tf
-from mint.utils import config_util
-from mint.core import model_builder
+
+# Import core functions from generate_dance.py (single source of truth)
+from generate_dance import (
+    extract_audio_features,
+    load_model,
+    create_neutral_motion,
+    generate_dance,
+)
 
 # Retargeting
 from retarget_to_tonypi import TONYPI_SERVO_MAP, ACTIVE_SERVOS, SMPL_JOINTS, radians_to_pulse
 
 
-class AudioFeatureExtractor:
-    """Extract audio features for FACT model."""
-
-    def __init__(self, sample_rate=30720, hop_length=512, n_fft=2048):
-        self.sample_rate = sample_rate
-        self.hop_length = hop_length
-        self.n_fft = n_fft
-
-        # Pre-compute mel filterbank
-        self.mel_fb = self._mel_filterbank(sample_rate, n_fft, n_mels=128)
-        self.fft_freqs = np.fft.rfftfreq(n_fft, 1.0 / sample_rate)
-        self.window = signal.windows.hann(n_fft)
-
-    def _mel_filterbank(self, sr, n_fft, n_mels=128, fmin=0, fmax=None):
-        if fmax is None:
-            fmax = sr / 2
-
-        def hz_to_mel(hz):
-            return 2595 * np.log10(1 + hz / 700)
-        def mel_to_hz(mel):
-            return 700 * (10 ** (mel / 2595) - 1)
-
-        mel_min = hz_to_mel(fmin)
-        mel_max = hz_to_mel(fmax)
-        mels = np.linspace(mel_min, mel_max, n_mels + 2)
-        freqs = mel_to_hz(mels)
-
-        fft_freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
-        filterbank = np.zeros((n_mels, len(fft_freqs)))
-
-        for i in range(n_mels):
-            lower, center, upper = freqs[i], freqs[i + 1], freqs[i + 2]
-            for j, freq in enumerate(fft_freqs):
-                if lower <= freq <= center:
-                    filterbank[i, j] = (freq - lower) / (center - lower)
-                elif center <= freq <= upper:
-                    filterbank[i, j] = (upper - freq) / (upper - center)
-
-        return filterbank
-
-    def extract_frame_features(self, audio_frame):
-        """Extract 35-dim features from a single audio frame."""
-
-        # Ensure correct size
-        if len(audio_frame) < self.n_fft:
-            audio_frame = np.pad(audio_frame, (0, self.n_fft - len(audio_frame)))
-
-        frame = audio_frame[:self.n_fft] * self.window
-        spectrum = np.abs(np.fft.rfft(frame))
-
-        # Envelope (energy)
-        envelope = np.sqrt(np.mean(frame ** 2))
-
-        # MFCC (20 dims)
-        mel_spec = np.dot(spectrum, self.mel_fb.T)
-        mel_spec = np.log(mel_spec + 1e-8)
-        mfcc = dct(mel_spec, type=2, norm='ortho')[:20]
-
-        # Chroma (12 dims)
-        chroma = np.zeros(12)
-        for i, freq in enumerate(self.fft_freqs):
-            if freq > 0:
-                pitch_class = int(round(12 * np.log2(freq / 440) + 69)) % 12
-                chroma[pitch_class] += spectrum[i]
-        chroma = chroma / (np.max(chroma) + 1e-8)
-
-        # Peak/beat (simplified - server doesn't track history)
-        peak_onehot = 1.0 if envelope > 0.1 else 0.0
-        beat_onehot = 0.0  # Would need history for proper beat detection
-
-        features = np.concatenate([
-            [envelope],
-            mfcc,
-            chroma,
-            [peak_onehot],
-            [beat_onehot]
-        ])
-
-        return features.astype(np.float32)
-
-
 class FACTDanceServer:
-    """Real-time FACT dance generation server."""
+    """FACT dance generation server."""
 
     def __init__(self, config_path, checkpoint_dir):
         print("Loading FACT model...")
-        self.model = self._load_model(config_path, checkpoint_dir)
+        self.model = load_model(config_path, checkpoint_dir)
         print("Model loaded!")
 
-        self.feature_extractor = AudioFeatureExtractor()
-
-        # Rolling buffers
-        self.audio_buffer = deque(maxlen=30720 * 4)  # 4 seconds of audio
-        self.feature_buffer = deque(maxlen=240)  # FACT needs 240 frames of audio context
-        self.motion_buffer = deque(maxlen=120)  # 120 frames of motion history (seed)
-
-        # Initialize with neutral pose
-        self._init_neutral_motion()
-
-        # Performance tracking
-        self.inference_times = deque(maxlen=100)
-        self.last_inference_time = 0
-
-    def _load_model(self, config_path, checkpoint_dir):
-        configs = config_util.get_configs_from_pipeline_file(config_path)
-        model_config = configs['model']
-
-        model = model_builder.build(model_config, is_training=False)
-        model.global_step = tf.Variable(initial_value=0, dtype=tf.int64)
-
-        checkpoint = tf.train.Checkpoint(model=model, global_step=model.global_step)
-        checkpoint_manager = tf.train.CheckpointManager(
-            checkpoint, directory=checkpoint_dir, max_to_keep=5
-        )
-        checkpoint.restore(checkpoint_manager.latest_checkpoint).expect_partial()
-        print(f"Loaded checkpoint: {checkpoint_manager.latest_checkpoint}")
-
-        return model
-
-    def _init_neutral_motion(self):
-        """Initialize with neutral standing pose."""
-        identity_rotmat = np.array([1, 0, 0, 0, 1, 0, 0, 0, 1], dtype=np.float32)
-        neutral_frame = np.zeros(225, dtype=np.float32)
-        neutral_frame[0:3] = [0, 0, 0]  # Translation
-        for joint in range(24):
-            start_idx = 3 + joint * 9
-            neutral_frame[start_idx:start_idx + 9] = identity_rotmat
-
-        for _ in range(120):
-            self.motion_buffer.append(neutral_frame.copy())
+        self.fps = 60
+        self.cancel_flag = False  # Set to True to cancel current job
+        self.is_processing = False  # Track if a job is in progress
 
     def _motion_to_servos(self, motion_frame):
         """Convert a single motion frame to servo commands."""
@@ -182,7 +65,8 @@ class FACTDanceServer:
             axis = config['axis']
 
             # Extract rotation matrix for this joint
-            start_idx = 3 + smpl_idx * 9
+            # Motion format: [0:6] padding, [6:9] translation, [9:225] 24 joints x 9 rotmat
+            start_idx = 9 + smpl_idx * 9
             rotmat = motion_frame[start_idx:start_idx + 9].reshape(3, 3)
 
             # Convert to euler angles
@@ -199,67 +83,161 @@ class FACTDanceServer:
 
         return servo_commands
 
-    async def process_audio(self, audio_chunk):
-        """Process incoming audio and generate dance."""
+    def cancel_current_job(self):
+        """Cancel any in-progress job."""
+        if self.is_processing:
+            print("Cancelling current job...")
+            self.cancel_flag = True
 
-        # Add to audio buffer
-        self.audio_buffer.extend(audio_chunk)
+    async def process_audio_file(self, audio_path, websocket=None):
+        """Process audio file and generate complete dance.
 
-        # Extract features for new audio
-        hop = self.feature_extractor.hop_length
-        n_fft = self.feature_extractor.n_fft
+        Args:
+            audio_path: Path to audio file on server
+            websocket: Optional websocket for progress updates
 
-        # Process as many frames as we can
-        audio_array = np.array(self.audio_buffer)
-        while len(audio_array) >= n_fft:
-            frame = audio_array[:n_fft]
-            features = self.feature_extractor.extract_frame_features(frame)
-            self.feature_buffer.append(features)
-            audio_array = audio_array[hop:]
+        Returns:
+            dict with frames, fps, and metadata
+        """
+        # Reset cancel flag and mark as processing
+        self.cancel_flag = False
+        self.is_processing = True
 
-        # Update audio buffer (remove processed samples)
-        self.audio_buffer.clear()
-        self.audio_buffer.extend(audio_array)
-
-        # Check if we have enough context to generate
-        if len(self.feature_buffer) < 240 or len(self.motion_buffer) < 120:
-            return None
-
-        # Run FACT inference
+        print(f"Processing audio file: {audio_path}")
         start_time = time.time()
 
-        # Prepare inputs
-        motion_input = np.array(list(self.motion_buffer))[np.newaxis, :, :]  # [1, 120, 225]
-        audio_input = np.array(list(self.feature_buffer))[np.newaxis, :, :]  # [1, 240, 35]
+        # Step 1: Extract audio features using generate_dance.py
+        if websocket:
+            await websocket.send(json.dumps({
+                'type': 'progress',
+                'stage': 'features',
+                'message': 'Extracting audio features...'
+            }))
 
-        motion_tensor = tf.constant(motion_input, dtype=tf.float32)
-        audio_tensor = tf.constant(audio_input, dtype=tf.float32)
+        audio_features = extract_audio_features(audio_path, target_fps=60)
+        n_feature_frames = len(audio_features)
+        print(f"Extracted {n_feature_frames} feature frames")
 
-        inputs = {
-            "motion_input": motion_tensor,
-            "audio_input": audio_tensor
-        }
+        if websocket:
+            await websocket.send(json.dumps({
+                'type': 'progress',
+                'stage': 'features_done',
+                'message': f'Extracted {n_feature_frames} feature frames',
+                'feature_frames': n_feature_frames
+            }))
 
-        # Generate next frames (generate a small batch for efficiency)
-        outputs = self.model.infer_auto_regressive(inputs, steps=10)
-        generated = outputs[0].numpy()  # [10, 225]
+        # Step 2: Calculate steps to generate
+        audio_seq_length = 240
+        steps_to_generate = n_feature_frames - audio_seq_length
 
-        inference_time = time.time() - start_time
-        self.inference_times.append(inference_time)
-        self.last_inference_time = inference_time
+        if steps_to_generate <= 0:
+            steps_to_generate = 60
+            pad_amount = audio_seq_length - n_feature_frames + steps_to_generate
+            audio_features = np.pad(audio_features, ((0, pad_amount), (0, 0)), mode='edge')
 
-        # Update motion buffer with generated frames
-        for frame in generated:
-            self.motion_buffer.append(frame)
+        print(f"Generating {steps_to_generate} motion frames...")
 
-        # Convert latest frame to servo commands
-        servo_commands = self._motion_to_servos(generated[-1])
+        if websocket:
+            await websocket.send(json.dumps({
+                'type': 'progress',
+                'stage': 'generating',
+                'message': f'Generating {steps_to_generate} motion frames...',
+                'total_frames': steps_to_generate
+            }))
+
+        # Step 3: Generate motion
+        seed_motion = create_neutral_motion(n_frames=120)
+        gen_start = time.time()
+
+        # Generate in chunks for progress updates
+        all_motion = []
+        chunk_size = 120
+        remaining = steps_to_generate
+        frames_done = 0
+
+        while remaining > 0:
+            # Check for cancellation
+            if self.cancel_flag:
+                print("Job cancelled!")
+                self.is_processing = False
+                if websocket:
+                    await websocket.send(json.dumps({
+                        'type': 'cancelled',
+                        'message': 'Job cancelled - new file uploaded'
+                    }))
+                return None
+
+            current_chunk = min(chunk_size, remaining)
+
+            if all_motion:
+                recent = np.array(all_motion[-120:]) if len(all_motion) >= 120 else np.array(all_motion)
+                if len(recent) < 120:
+                    pad = create_neutral_motion(120 - len(recent))
+                    seed_motion = np.vstack([pad, recent])
+                else:
+                    seed_motion = recent
+
+            motion = generate_dance(
+                self.model,
+                audio_features,
+                seed_motion,
+                steps=current_chunk
+            )
+
+            all_motion.extend(motion)
+            frames_done += current_chunk
+            remaining -= current_chunk
+
+            elapsed = time.time() - gen_start
+            fps = frames_done / elapsed if elapsed > 0 else 0
+            eta = remaining / fps if fps > 0 else 0
+
+            print(f"Generated {frames_done}/{steps_to_generate} frames ({fps:.1f} fps, ETA {eta:.0f}s)")
+
+            if websocket:
+                await websocket.send(json.dumps({
+                    'type': 'progress',
+                    'stage': 'generating',
+                    'frames_done': frames_done,
+                    'total_frames': steps_to_generate,
+                    'fps': round(fps, 1),
+                    'eta_seconds': round(eta)
+                }))
+
+            # Yield to allow other tasks (like receiving cancel signal)
+            await asyncio.sleep(0)
+
+        gen_time = time.time() - gen_start
+        print(f"Generated {len(all_motion)} frames in {gen_time:.1f}s")
+
+        # Step 4: Convert motion to servo commands
+        if websocket:
+            await websocket.send(json.dumps({
+                'type': 'progress',
+                'stage': 'converting',
+                'message': 'Converting to servo commands...'
+            }))
+
+        servo_frames = []
+        for motion_frame in all_motion:
+            servo_commands = self._motion_to_servos(motion_frame)
+            servo_frames.append({
+                'servos': servo_commands,
+                'time_ms': int(1000 / self.fps)
+            })
+
+        total_time = time.time() - start_time
+        print(f"Batch complete: {len(servo_frames)} frames in {total_time:.1f}s")
+
+        self.is_processing = False
 
         return {
-            'servos': servo_commands,
-            'inference_time_ms': int(inference_time * 1000),
-            'avg_inference_ms': int(np.mean(list(self.inference_times)) * 1000),
-            'fps': 10 / inference_time if inference_time > 0 else 0
+            'type': 'batch_result',
+            'frames': servo_frames,
+            'fps': self.fps,
+            'n_frames': len(servo_frames),
+            'duration_seconds': len(servo_frames) / self.fps,
+            'generation_time_seconds': round(total_time, 1),
         }
 
 
@@ -271,95 +249,142 @@ async def handle_client(websocket, server):
 
     try:
         async for message in websocket:
-            # Parse incoming message
-            data = json.loads(message)
+            # Check if binary (file upload) or JSON
+            if isinstance(message, bytes):
+                # Binary file upload - save to temp and process
+                print(f"Received binary file: {len(message)} bytes")
 
-            if data['type'] == 'audio':
-                # Decode audio chunk (sent as list of floats)
-                audio_chunk = np.array(data['audio'], dtype=np.float32)
+                # Cancel any in-progress job
+                server.cancel_current_job()
 
-                # Process and get servo commands
-                result = await server.process_audio(audio_chunk)
+                # Save to temp file
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+                    f.write(message)
+                    temp_path = f.name
 
-                if result:
+                try:
+                    result = await server.process_audio_file(temp_path, websocket)
+                    if result:  # None if cancelled
+                        await websocket.send(json.dumps(result))
+                        print(f"Sent batch result: {result['n_frames']} frames")
+                finally:
+                    os.unlink(temp_path)
+
+            else:
+                # JSON message
+                data = json.loads(message)
+
+                if data['type'] == 'batch_file':
+                    # Base64 encoded file
+                    print("Received base64 encoded file")
+
+                    # Cancel any in-progress job
+                    server.cancel_current_job()
+
+                    file_data = base64.b64decode(data['file'])
+                    filename = data.get('filename', 'audio.wav')
+                    ext = os.path.splitext(filename)[1] or '.wav'
+
+                    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+                        f.write(file_data)
+                        temp_path = f.name
+
+                    try:
+                        result = await server.process_audio_file(temp_path, websocket)
+                        if result:  # None if cancelled
+                            await websocket.send(json.dumps(result))
+                            print(f"Sent batch result: {result['n_frames']} frames")
+                    finally:
+                        os.unlink(temp_path)
+
+                elif data['type'] == 'batch_path':
+                    # File path on server (for CLI usage)
+                    audio_path = data['path']
+                    if not os.path.exists(audio_path):
+                        await websocket.send(json.dumps({
+                            'type': 'error',
+                            'message': f'File not found: {audio_path}'
+                        }))
+                        continue
+
+                    result = await server.process_audio_file(audio_path, websocket)
+                    await websocket.send(json.dumps(result))
+                    print(f"Sent batch result: {result['n_frames']} frames")
+
+                elif data['type'] == 'ping':
+                    await websocket.send(json.dumps({'type': 'pong'}))
+
+                elif data['type'] == 'status':
                     await websocket.send(json.dumps({
-                        'type': 'servos',
-                        **result
+                        'type': 'status',
+                        'model_loaded': server.model is not None,
+                        'fps': server.fps
                     }))
-
-            elif data['type'] == 'ping':
-                await websocket.send(json.dumps({'type': 'pong'}))
-
-            elif data['type'] == 'status':
-                await websocket.send(json.dumps({
-                    'type': 'status',
-                    'feature_buffer': len(server.feature_buffer),
-                    'motion_buffer': len(server.motion_buffer),
-                    'avg_inference_ms': int(np.mean(list(server.inference_times)) * 1000) if server.inference_times else 0
-                }))
 
     except websockets.exceptions.ConnectionClosed:
         print(f"Client disconnected: {client_addr}")
     except Exception as e:
         print(f"Error handling client: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': str(e)
+            }))
+        except:
+            pass
 
 
 async def main(args):
     print("=" * 60)
-    print("🤖 FACT Dance Server")
+    print("FACT Dance Server")
     print("=" * 60)
     print(f"\nStarting server on port {args.port}...")
 
-    # Check for GPU
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
-        print(f"✅ GPU detected: {gpus}")
+        print(f"GPU detected: {gpus}")
     else:
-        print("⚠️  No GPU detected - will be slow!")
+        print("No GPU detected - will be slow!")
 
-    # Initialize server
     server = FACTDanceServer(
         config_path=args.config,
         checkpoint_dir=args.checkpoint
     )
 
-    # Start WebSocket server
     async with websockets.serve(
         lambda ws: handle_client(ws, server),
         "0.0.0.0",
         args.port,
-        max_size=10 * 1024 * 1024  # 10MB max message
+        max_size=100 * 1024 * 1024  # 100MB max for file uploads
     ):
-        print(f"\n✅ Server running on ws://0.0.0.0:{args.port}")
+        print(f"\nServer running on ws://0.0.0.0:{args.port}")
+        print("Accepts: binary file, {'type':'batch_file','file':base64,'filename':...}, or {'type':'batch_path','path':...}")
         print("Waiting for connections...")
-        await asyncio.Future()  # Run forever
+        await asyncio.Future()
 
 
 def get_default_path(relative_path):
     """Try multiple locations for config/checkpoint paths."""
-    # Try paths in order of preference
     candidates = [
-        os.path.join(os.path.expanduser('~'), relative_path),  # ~/mint/...
-        os.path.join(os.path.dirname(__file__), relative_path),  # script_dir/mint/...
-        relative_path,  # relative to cwd
+        os.path.join(os.path.expanduser('~'), relative_path),
+        os.path.join(os.path.dirname(__file__), relative_path),
+        relative_path,
     ]
     for path in candidates:
         if os.path.exists(path):
             return path
-    # Return home directory version as default (most common on cloud)
     return candidates[0]
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='FACT Dance Server')
     parser.add_argument('--port', type=int, default=8765, help='WebSocket port')
-    parser.add_argument('--config', type=str, default=None,
-                       help='Path to config file (default: ~/mint/configs/fact_v5_deeper_t10_cm12.config)')
-    parser.add_argument('--checkpoint', type=str, default=None,
-                       help='Path to checkpoint directory (default: ~/mint/checkpoints)')
+    parser.add_argument('--config', type=str, default=None)
+    parser.add_argument('--checkpoint', type=str, default=None)
     args = parser.parse_args()
 
-    # Resolve default paths if not specified
     if args.config is None:
         args.config = get_default_path('mint/configs/fact_v5_deeper_t10_cm12.config')
     if args.checkpoint is None:

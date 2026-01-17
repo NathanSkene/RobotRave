@@ -42,10 +42,11 @@ class ServoController:
 
         Handles both bus servos (1-16) and PWM servos (pwm1, pwm2 for head).
         """
+        # Always print for debugging
+        servos_str = ", ".join(f"{k}:{v}" for k, v in sorted(servo_dict.items(), key=lambda x: str(x[0])))
+        print(f"Servos: {servos_str}", flush=True)
+
         if not self.board:
-            # Test mode - just print
-            servos_str = ", ".join(f"{k}:{v}" for k, v in sorted(servo_dict.items(), key=lambda x: str(x[0])))
-            print(f"Servos: {servos_str}")
             return
 
         bus_cmds = []

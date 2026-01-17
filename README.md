@@ -160,6 +160,8 @@ servo.set_position(7, pulse)  # Servo 7 = right shoulder
 
 The result isn't a perfect recreation of the human dance, but it captures the essence - when the dancer's arms go up, the robot's arms go up. When they bob their head, the robot bobs its head.
 
+**For detailed output format documentation, see [MODEL_OUTPUT.md](MODEL_OUTPUT.md).**
+
 ---
 
 ## Tony Pro Servo Mapping
@@ -206,8 +208,10 @@ RobotRave/
 ├── fact_server.py           # Cloud GPU server for FACT inference
 ├── fact_client.py           # Robot client for cloud inference
 ├── discover_servos.py       # Interactive servo discovery tool
+├── setup.sh                 # Setup script (downloads model weights)
 ├── RESEARCH.md              # Detailed research notes & approach analysis
 ├── CLOUD_SETUP.md           # GPU cloud deployment guide
+├── MODEL_OUTPUT.md          # FACT model output format documentation
 └── (submodules - not tracked)
     ├── mint/                # Google FACT model
     ├── TonyPi/              # Hiwonder SDK

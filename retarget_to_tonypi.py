@@ -67,6 +67,14 @@ def smooth_trajectory(angles, window_size=5):
     if window_size <= 1:
         return angles
 
+    # np.convolve(mode='same') returns output length max(N, M).
+    # For very short sequences, clamp the window to avoid shape mismatches.
+    n_frames = angles.shape[0]
+    if n_frames < 2:
+        return angles
+    if window_size > n_frames:
+        window_size = n_frames
+
     kernel = np.ones(window_size) / window_size
     smoothed = np.zeros_like(angles)
 

@@ -1,107 +1,57 @@
 # FACT Server Cloud Deployment
 
-## Quick Start (AWS - You Have Credits!)
+## Quick Start: Lambda Labs (Recommended)
 
-### 1. Launch GPU Instance
-```bash
-# Using AWS CLI (or use Console)
-aws ec2 run-instances \
-  --image-id ami-0c7217cdde317cfec \
-  --instance-type g5.2xlarge \
-  --key-name your-key-name \
-  --security-group-ids sg-xxxxx \
-  --subnet-id subnet-xxxxx \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=fact-dance-server}]'
-```
-
-**Recommended instance types:**
-| Instance | GPU | VRAM | Cost/hr | With $5000 credits |
-|----------|-----|------|---------|-------------------|
-| g5.xlarge | 1x A10G | 24GB | $1.00 | 5000 hours |
-| g5.2xlarge | 1x A10G | 24GB | $1.21 | 4100 hours |
-| p4d.24xlarge | 8x A100 | 320GB | $32.77 | 152 hours |
-
-### 2. Configure Security Group
-Allow inbound traffic on port 8765:
-```bash
-aws ec2 authorize-security-group-ingress \
-  --group-id sg-xxxxx \
-  --protocol tcp \
-  --port 8765 \
-  --cidr 0.0.0.0/0
-```
-
-### 3. SSH and Setup (Easy Way)
-```bash
-ssh -i your-key.pem ubuntu@<instance-public-ip>
-
-# One-liner setup (downloads and runs deploy script)
-curl -sL https://raw.githubusercontent.com/YOUR_REPO/RobotRave/main/deploy_server.sh | bash
-```
-
-### 3b. SSH and Setup (Manual Way)
-```bash
-ssh -i your-key.pem ubuntu@<instance-public-ip>
-
-# Install dependencies
-sudo apt update && sudo apt install -y python3-pip python3-venv git
-python3 -m venv venv
-source venv/bin/activate
-
-pip install tensorflow[and-cuda] numpy scipy websockets soundfile
-
-# Clone repo and MINT
-git clone https://github.com/google-research/mint.git
-# Download checkpoints to mint/checkpoints/
-
-# Copy fact_server.py and retarget_to_tonypi.py from your local machine
-# scp fact_server.py retarget_to_tonypi.py ubuntu@<ip>:~/
-
-# Verify GPU
-python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
-
-# Start server
-python fact_server.py --port 8765
-```
-
-### 4. Connect from Robot
-```bash
-python fact_client.py --server ws://<aws-public-ip>:8765
-```
-
----
-
-## Alternative: Lambda Labs (Simpler, No Credits Needed)
+Lambda Labs is the easiest option because their "Lambda Stack" comes with TensorFlow pre-configured for GPU use. **Don't fight it - use it!**
 
 ### 1. Rent GPU Instance
 Go to [Lambda Labs](https://lambdalabs.com/) and rent:
-- **1x H100 PCIe** (~$2/hour) - Best price/performance
-- Or **1x A100** (~$1.10/hour) - Still good
+- **1x H100 PCIe** (~$2/hour) - Best performance
+- **1x A100** (~$1.10/hour) - Good balance
 
 ### 2. SSH into Instance
 ```bash
 ssh ubuntu@<instance-ip>
 ```
 
-### 3. Set Up Server
+### 3. Run Setup Script (Easy Way)
 ```bash
-# Clone the repo (or scp your files)
-git clone https://github.com/YOUR_REPO/RobotRave.git
-cd RobotRave
+# One-liner setup for Lambda Labs
+curl -sL https://raw.githubusercontent.com/YOUR_REPO/RobotRave/main/lambda_setup.sh | bash
+```
 
-# Set up Python environment
-python3 -m venv venv
-source venv/bin/activate
+### 3b. Manual Setup (If You Need to Understand)
+```bash
+# IMPORTANT: Do NOT create a virtual environment on Lambda Labs!
+# The system Python has TensorFlow pre-configured for GPU.
 
-# Install dependencies
-pip install tensorflow numpy scipy websockets soundfile
+# Install ONLY the missing packages (NOT tensorflow!)
+pip install --upgrade ml_dtypes einops tensorflow-graphics websockets soundfile scipy
 
-# Clone MINT and download checkpoints
-git clone https://github.com/google-research/mint.git
-# Download checkpoints from Google Drive to mint/checkpoints/
+# Clone MINT repository
+cd ~
+git clone --depth 1 https://github.com/google-research/mint.git
 
-# Start server
-python fact_server.py --port 8765
+# Apply Keras compatibility fix (add_weight needs name= parameter)
+sed -i 's/self.add_weight(\s*"position_embedding"/self.add_weight(name="position_embedding"/g' mint/mint/core/base_models.py
+sed -i 's/self.add_weight(\s*"cls_token"/self.add_weight(name="cls_token"/g' mint/mint/core/base_models.py
+
+# Compile protocol buffers
+pip install grpcio-tools
+cd mint && python -m grpc_tools.protoc -I. --python_out=. ./mint/protos/*.proto && cd ~
+
+# Download checkpoints (from Google Drive)
+# https://drive.google.com/drive/folders/17GHwKRZbQfyC9-7oEpzCG8pp_rAI0cOm
+# Upload to ~/mint/checkpoints/
+
+# Verify GPU is detected
+python -c "import tensorflow as tf; print('GPU:', tf.config.list_physical_devices('GPU'))"
+
+# Start server (use ABSOLUTE paths!)
+python ~/fact_server.py \
+  --config ~/mint/configs/fact_v5_deeper_t10_cm12.config \
+  --checkpoint ~/mint/checkpoints \
+  --port 8765
 ```
 
 ### 4. Open Firewall
@@ -114,6 +64,110 @@ python fact_client.py --server ws://<instance-ip>:8765 --test
 
 # Run live!
 python fact_client.py --server ws://<instance-ip>:8765 --simulate
+```
+
+---
+
+## What Can Go Wrong (Troubleshooting)
+
+### "ModuleNotFoundError: No module named 'ml_dtypes'"
+```bash
+pip install --upgrade ml_dtypes
+```
+
+### "TypeError: add_weight() got multiple values for argument 'name'"
+The MINT base_models.py uses old Keras syntax. Apply the fix:
+```bash
+sed -i 's/self.add_weight(\s*"position_embedding"/self.add_weight(name="position_embedding"/g' mint/mint/core/base_models.py
+```
+
+### "No GPU detected" / TensorFlow not seeing GPU
+**On Lambda Labs, this usually means you pip installed tensorflow and overwrote the working system version!**
+
+Solution:
+```bash
+# Remove the broken tensorflow
+pip uninstall tensorflow tensorflow-gpu -y
+
+# Reinstall from Lambda's system packages
+sudo apt install --reinstall python3-tensorflow 2>/dev/null || true
+
+# Or just start a fresh instance and DON'T pip install tensorflow
+```
+
+### "FileNotFoundError: mint/configs/..."
+The config path is relative. Either:
+1. Run from the directory containing `mint/`: `cd ~ && python fact_server.py`
+2. Use absolute paths: `--config ~/mint/configs/...`
+
+### "protobuf version conflict"
+```bash
+pip install --upgrade protobuf
+```
+
+### "numpy/scipy version issues"
+```bash
+pip install --upgrade numpy scipy
+```
+
+### "Connection Refused" from client
+- Check firewall allows port 8765 (Lambda dashboard → Firewall)
+- Verify server is running: `ps aux | grep fact_server`
+- Check the server logs for errors
+
+### Slow Inference (< 5 FPS)
+- Verify GPU is detected: `nvidia-smi`
+- Check TensorFlow sees GPU: `python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"`
+- If empty list, see "No GPU detected" above
+
+---
+
+## Alternative: AWS (More Setup Required)
+
+AWS requires more configuration but you may have credits to use.
+
+### 1. Launch GPU Instance
+```bash
+aws ec2 run-instances \
+  --image-id ami-0c7217cdde317cfec \
+  --instance-type g5.2xlarge \
+  --key-name your-key-name \
+  --security-group-ids sg-xxxxx \
+  --subnet-id subnet-xxxxx
+```
+
+**Recommended instance types:**
+| Instance | GPU | VRAM | Cost/hr | With $5000 credits |
+|----------|-----|------|---------|-------------------|
+| g5.xlarge | 1x A10G | 24GB | $1.00 | 5000 hours |
+| g5.2xlarge | 1x A10G | 24GB | $1.21 | 4100 hours |
+| p4d.24xlarge | 8x A100 | 320GB | $32.77 | 152 hours |
+
+### 2. Configure Security Group
+```bash
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-xxxxx \
+  --protocol tcp \
+  --port 8765 \
+  --cidr 0.0.0.0/0
+```
+
+### 3. SSH and Setup
+```bash
+ssh -i your-key.pem ubuntu@<instance-public-ip>
+
+# Install dependencies (AWS Deep Learning AMI may need these)
+sudo apt update && sudo apt install -y python3-pip git
+pip install tensorflow[and-cuda] numpy scipy websockets soundfile einops tensorflow-graphics
+
+# Clone MINT and setup (same as Lambda Labs steps above)
+git clone https://github.com/google-research/mint.git
+# ... rest of setup ...
+```
+
+### 4. Connect from Robot
+```bash
+python fact_client.py --server ws://<aws-public-ip>:8765
 ```
 
 ---
@@ -154,32 +208,18 @@ print(f"Connect to: {public_url}")
 
 ---
 
-## Alternative: AWS (More Complex)
-
-```bash
-# Launch p4d.24xlarge (8x A100) or g5.xlarge (A10G)
-aws ec2 run-instances \
-  --image-id ami-0xxx \
-  --instance-type p4d.24xlarge \
-  --key-name your-key
-
-# SSH and setup (same as above)
-```
-
----
-
 ## Expected Performance
 
-| GPU | AWS Instance | Cost/hr | Est. FPS | Real-time? |
-|-----|--------------|---------|----------|------------|
+| GPU | Provider | Cost/hr | Est. FPS | Real-time? |
+|-----|----------|---------|----------|------------|
 | CPU (i7) | - | - | 0.5 | ❌ |
-| T4 | g4dn.xlarge | $0.52 | ~5 | ❌ |
-| **A10G** | **g5.xlarge** | **$1.00** | **~15-25** | **✅ Probably** |
-| L4 | g6.xlarge | $0.80 | ~20 | ✅ Probably |
-| A100 | p4d.24xlarge | $32.77 | ~50+ | ✅ Yes |
-| H100 | p5.48xlarge | $98.32 | ~80+ | ✅ Yes |
+| T4 | Colab/AWS | $0.52 | ~5 | ❌ |
+| **A10G** | **AWS g5** | **$1.00** | **~15-25** | **✅ Probably** |
+| L4 | AWS g6 | $0.80 | ~20 | ✅ Probably |
+| A100 | Lambda/AWS | $1.10-32 | ~50+ | ✅ Yes |
+| H100 | Lambda | ~$2.00 | ~80+ | ✅ Yes |
 
-**Recommendation: g5.xlarge or g5.2xlarge** - Best value with your credits!
+**Recommendation: Lambda Labs H100 or A100** - Best value with simplest setup!
 
 *Note: These are estimates. We generate 10 frames per inference call for efficiency.*
 
@@ -190,23 +230,6 @@ aws ec2 run-instances \
 1. **Batch Processing**: Generate 10-20 frames per inference call
 2. **Model Quantization**: Use TensorRT or XLA for faster inference
 3. **Reduce Motion Buffer**: Smaller seed = faster inference
-
----
-
-## Troubleshooting
-
-### "Connection Refused"
-- Check firewall allows port 8765
-- Verify server is running: `ps aux | grep fact_server`
-
-### Slow Inference
-- Verify GPU is detected: `nvidia-smi`
-- Check TensorFlow sees GPU: `python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"`
-
-### High Latency
-- Use server closer to your location
-- Reduce audio chunk size in client
-- Use wired internet if possible
 
 ---
 

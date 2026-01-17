@@ -335,12 +335,34 @@ async def main(args):
         await asyncio.Future()  # Run forever
 
 
+def get_default_path(relative_path):
+    """Try multiple locations for config/checkpoint paths."""
+    # Try paths in order of preference
+    candidates = [
+        os.path.join(os.path.expanduser('~'), relative_path),  # ~/mint/...
+        os.path.join(os.path.dirname(__file__), relative_path),  # script_dir/mint/...
+        relative_path,  # relative to cwd
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    # Return home directory version as default (most common on cloud)
+    return candidates[0]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='FACT Dance Server')
     parser.add_argument('--port', type=int, default=8765, help='WebSocket port')
-    parser.add_argument('--config', type=str,
-                       default='mint/configs/fact_v5_deeper_t10_cm12.config')
-    parser.add_argument('--checkpoint', type=str, default='mint/checkpoints')
+    parser.add_argument('--config', type=str, default=None,
+                       help='Path to config file (default: ~/mint/configs/fact_v5_deeper_t10_cm12.config)')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                       help='Path to checkpoint directory (default: ~/mint/checkpoints)')
     args = parser.parse_args()
+
+    # Resolve default paths if not specified
+    if args.config is None:
+        args.config = get_default_path('mint/configs/fact_v5_deeper_t10_cm12.config')
+    if args.checkpoint is None:
+        args.checkpoint = get_default_path('mint/checkpoints')
 
     asyncio.run(main(args))

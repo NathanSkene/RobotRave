@@ -80,15 +80,19 @@ class AudioStreamer:
         self.sample_rate = sample_rate
         self.chunk_size = int(sample_rate * chunk_duration)
         self.audio_queue = asyncio.Queue()
+        self._loop = None
 
     def start(self):
         """Start audio capture."""
+        # Store event loop reference for use in callback thread
+        self._loop = asyncio.get_running_loop()
+
         def callback(indata, frames, time_info, status):
             if status:
                 print(f"Audio status: {status}")
             # Put audio in queue (will be sent to server)
             audio = indata[:, 0].astype(np.float32)
-            asyncio.get_event_loop().call_soon_threadsafe(
+            self._loop.call_soon_threadsafe(
                 self.audio_queue.put_nowait, audio.copy()
             )
 

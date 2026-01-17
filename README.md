@@ -2,6 +2,21 @@
 
 Make a Tony Pro humanoid robot dance autonomously to music at a robot rave.
 
+## Quick Setup
+
+```bash
+git clone https://github.com/YOUR_USERNAME/RobotRave.git
+cd RobotRave
+./setup.sh
+```
+
+The setup script will:
+1. Clone the [MINT repository](https://github.com/google-research/mint) (Google's FACT model implementation)
+2. Download pre-trained model checkpoints (~500MB) from [Google Drive](https://drive.google.com/drive/folders/17GHwKRZbQfyC9-7oEpzCG8pp_rAI0cOm)
+3. Optionally install Python dependencies
+
+**Note:** The model weights are not stored in this repo due to size. The setup script uses `gdown` to fetch them automatically.
+
 ## The Approach
 
 We use Google's **FACT model** (Full-Attention Cross-modal Transformer) from their [AI Choreographer](https://google.github.io/aichoreographer/) research to generate human dance movements from music. The model was trained on the AIST++ dataset containing 1,408 dance sequences across 10 genres.
@@ -205,11 +220,14 @@ RobotRave/
 
 ### 1. Initial Connection (~15 min)
 ```bash
+# Connect to robot's WiFi network: HW-67B69FFB
+
 # SSH into the robot's Raspberry Pi
-ssh pi@<robot-ip-address>
+ssh pi@192.168.149.1
+# Password: raspberrypi
 
 # Copy project files to robot
-scp -r *.py tony_pro_config.json pi@<robot-ip>:~/RobotRave/
+scp -r *.py tony_pro_config.json pi@192.168.149.1:~/RobotRave/
 ```
 
 ### 2. Verify Servo Mapping (~30 min)

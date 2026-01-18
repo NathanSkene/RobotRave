@@ -1,8 +1,44 @@
 # RobotRave
 
-Make a Tony Pro humanoid robot dance autonomously to music at a robot rave.
+Make a TonyPi Pro humanoid robot dance autonomously to music using AI-generated choreography.
 
-## Quick Setup
+## Current Approach: Feature-Based Choreography
+
+We use Google's **FACT model** to generate human dance motion from audio, then convert it to sequences of **pre-scripted robot actions** using feature-based matching. This approach is more stable than sending raw servo values directly.
+
+```
+Audio (.mp3)
+    ↓ FACT Model (Lambda GPU)
+Motion Data (.npy)
+    ↓ Retargeting
+Dance JSON (servo values)
+    ↓ Feature Matching  ← THIS IS THE KEY STEP
+Choreography JSON (action triggers)
+    ↓ Playback
+Robot Dances + Music Plays
+```
+
+**Full pipeline documentation:** [CHOREOGRAPHY_README.md](CHOREOGRAPHY_README.md)
+
+### Quick Start (Choreography Pipeline)
+
+```bash
+# Generate choreography from FACT dance
+python3 generate_choreography.py \
+    --dance examples/dance_house_tonypi.json \
+    --library library.json \
+    --output choreo.json
+
+# Preview the action sequence
+python3 play_choreography.py --input choreo.json --preview
+
+# Play on robot with synced music
+python3 play_synced.py
+```
+
+---
+
+## Setup
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/RobotRave.git
@@ -17,13 +53,30 @@ The setup script will:
 
 **Note:** The model weights are not stored in this repo due to size. The setup script uses `gdown` to fetch them automatically.
 
-## The Approach
+---
+
+## How It Works
+
+### The FACT Model
 
 We use Google's **FACT model** (Full-Attention Cross-modal Transformer) from their [AI Choreographer](https://google.github.io/aichoreographer/) research to generate human dance movements from music. The model was trained on the AIST++ dataset containing 1,408 dance sequences across 10 genres.
 
-```
-Music Audio → FACT Model → SMPL Human Motion → Retarget → Tony Pro Servos → Robot Dances!
-```
+### Feature-Based Motion Matching
+
+Instead of sending FACT's raw servo values directly to the robot (which can cause instability), we:
+
+1. **Extract motion features** from FACT output:
+   - Body part activity (arms, legs, both)
+   - Motion type (static, oscillating, cyclic, single gesture)
+   - Periodicity (frequency of repetitive motion)
+   - Symmetry (mirror, parallel, one-sided)
+   - Energy (velocity, displacement)
+
+2. **Match to pre-scripted actions** from a library of 117 .d6a files (walks, kicks, waves, turns, etc.)
+
+3. **Generate choreography** - a timeline of action triggers synced to the music
+
+This gives stable, tested robot motion while still capturing the essence of the AI-generated dance.
 
 ### Why FACT?
 We evaluated three approaches:
@@ -198,24 +251,42 @@ After discovery, the correct 16-servo mapping:
 
 ```
 RobotRave/
+├── CHOREOGRAPHY_README.md   # Full choreography pipeline documentation
+├── examples/                # Sample dance, choreography, and audio
+│   ├── dance_house_tonypi.json
+│   ├── choreo.json
+│   └── mHO2.mp3
+├── action_groups/           # 117 pre-scripted .d6a robot actions
+├── library.json             # Pre-computed action features
+│
+│ # Choreography Pipeline (Current Approach)
+├── generate_choreography.py # Match FACT dance to library actions
+├── play_choreography.py     # Execute choreography on robot
+├── play_synced.py           # Synced playback (laptop audio + robot)
+├── motion_features.py       # Extract motion features
+├── match_motion.py          # Similarity scoring
+├── build_library.py         # Build action feature library
+├── read_d6a.py              # Read .d6a action files
+│
+│ # Core Scripts
 ├── tony_pro.py              # Central servo config & controller module
-├── tony_pro_config.json     # Servo mapping in JSON format
-├── beat_sync_dance.py       # Fallback: beat-triggered dance moves
-├── smart_dance.py           # Style-adaptive dancing (chill/pop/edm/hiphop)
-├── play_dance.py            # Play pre-generated dance sequences
 ├── retarget_to_tonypi.py    # SMPL → servo command conversion
-├── generate_dance.py        # Run FACT model on audio files
-├── fact_server.py           # Cloud GPU server for FACT inference
-├── fact_client.py           # Robot client for cloud inference
-├── discover_servos.py       # Interactive servo discovery tool
-├── setup.sh                 # Setup script (downloads model weights)
-├── RESEARCH.md              # Detailed research notes & approach analysis
+├── play_dance.py            # Direct servo playback (alternative)
+├── generate_dance.py        # Run FACT model on audio files (Lambda)
+│
+│ # Fallback / Testing
+├── beat_sync_dance.py       # Beat-triggered dance moves
+├── smart_dance.py           # Style-adaptive dancing
+├── discover_servos.py       # Interactive servo discovery
+│
+│ # Documentation
+├── RESEARCH.md              # Research notes & approach analysis
 ├── CLOUD_SETUP.md           # GPU cloud deployment guide
-├── MODEL_OUTPUT.md          # FACT model output format documentation
-└── (submodules - not tracked)
+├── MODEL_OUTPUT.md          # FACT model output format
+│
+└── (submodules)
     ├── mint/                # Google FACT model
-    ├── TonyPi/              # Hiwonder SDK
-    └── MDLT/                # Alternative approach (unused)
+    └── TonyPi/              # Hiwonder SDK
 ```
 
 ---

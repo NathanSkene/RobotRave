@@ -1,41 +1,117 @@
 # RobotRave Project Notes
 
+## Overview
+
+This project uses the FACT (Full Attention Cross-modal Transformer) model to generate dance motion from audio, then maps it to pre-scripted robot actions for playback on a TonyPi humanoid robot.
+
+## Current Approach: Feature-Based Choreography
+
+**We convert FACT-generated dance to sequences of pre-scripted .d6a actions** rather than sending raw servo values directly. This approach:
+
+1. Extracts high-level motion features (activity, periodicity, symmetry, energy) from FACT output
+2. Matches segments to the most similar actions from a library of 117 pre-scripted .d6a files
+3. Generates a choreography timeline of action triggers
+4. Plays actions in sequence synced with music
+
+**See [CHOREOGRAPHY_README.md](CHOREOGRAPHY_README.md) for full pipeline documentation.**
+
+### Quick Start
+
+```bash
+# Generate choreography from FACT dance
+python3 generate_choreography.py --dance dance_house_tonypi.json --library library.json --output choreo.json
+
+# Copy to robot
+scp choreo.json play_choreography.py read_d6a.py pi@raspberrypi.local:~/
+
+# Play with synced music (music on laptop, robot dances)
+python3 play_synced.py
+```
+
+---
+
 ## Robot (TonyPi)
 - **SSH**: `ssh pi@raspberrypi.local`
 - **Password**: raspberrypi
+- **Action files**: `/home/pi/TonyPi/ActionGroups`
 
 ## Lambda Labs Server
 - **Server IP**: 132.145.180.105
-- **Port**: 8765
-- **WebSocket URL**: ws://132.145.180.105:8765
 - **SSH**: `ssh ubuntu@132.145.180.105`
+- **FACT config**: `~/mint/configs/fact_v5_deeper_t10_cm12.config`
 
-## Key Learnings
+---
 
-### Lambda Labs Setup (DON'T pip install tensorflow!)
-Lambda Stack has TensorFlow pre-configured for GPU. Installing tensorflow via pip **overwrites**
-the working system version and breaks GPU access.
+## Full Pipeline
 
-**Correct setup:**
+```
+Audio (.mp3)
+    ↓ [Lambda Server - FACT model]
+Motion (.npy)
+    ↓ [Laptop - retarget_to_tonypi.py]
+Dance JSON (servo values)
+    ↓ [Laptop - generate_choreography.py]  ← CURRENT APPROACH
+Choreography JSON (action triggers)
+    ↓ [Robot - play_choreography.py]
+Robot dances + Music plays
+```
+
+### Step 1: Generate Dance Motion (Lambda)
+```bash
+ssh ubuntu@132.145.180.105
+python generate_dance.py --audio mHO2_house_120bpm.mp3 --output dance.npy --duration 30
+```
+**Output**: `dance_angles.npy` - SMPL euler angles [frames, 24, 3]
+
+### Step 2: Retarget to Servos (Laptop)
+```bash
+scp ubuntu@132.145.180.105:~/dance_angles.npy .
+python3 retarget_to_tonypi.py --input dance_angles.npy --output dance_tonypi.json
+```
+**Output**: `dance_tonypi.json` - servo pulse values
+
+### Step 3: Generate Choreography (Laptop)
+```bash
+python3 generate_choreography.py --dance dance_tonypi.json --library library.json --output choreo.json
+```
+**Output**: `choreo.json` - action triggers with timestamps
+
+### Step 4: Play on Robot
+```bash
+scp choreo.json play_choreography.py read_d6a.py pi@raspberrypi.local:~/
+python3 play_synced.py  # Music on laptop, robot dances
+```
+
+---
+
+## Key Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `generate_choreography.py` | Match FACT dance to library actions |
+| `play_choreography.py` | Execute choreography on robot |
+| `play_synced.py` | Synced playback (laptop audio + robot) |
+| `build_library.py` | Pre-compute features for .d6a actions |
+| `motion_features.py` | Extract motion features |
+| `retarget_to_tonypi.py` | Convert SMPL angles to servo values |
+
+---
+
+## Lambda Labs Setup (DON'T pip install tensorflow!)
+
+Lambda Stack has TensorFlow pre-configured for GPU. Installing tensorflow via pip **overwrites** the working system version.
+
 ```bash
 # Only install missing packages
 pip install --upgrade ml_dtypes einops tensorflow-graphics websockets soundfile scipy
 ```
 
-### Config Paths
-Use absolute paths when running the server:
-```bash
-python ~/fact_server.py \
-  --config ~/mint/configs/fact_v5_deeper_t10_cm12.config \
-  --checkpoint ~/mint/checkpoints \
-  --port 8765
-```
-
 ### base_models.py Patch
-Newer TensorFlow requires `name=` parameter in add_weight():
 ```bash
 sed -i 's/self.add_weight(\s*"position_embedding"/self.add_weight(name="position_embedding"/g' mint/mint/core/base_models.py
 ```
+
+---
 
 ## FACT Model Architecture
 
@@ -47,89 +123,19 @@ def infer_auto_regressive(self, inputs, steps=1200):
     # inputs["motion_input"] is shape [batch, 120, 225] (seed motion)
 
     for i in range(steps):
-        # AUDIO: sliding window starting at position i
         audio_input = inputs["audio_input"][:, i: i + 240]
-
-        # Forward pass: 120 motion + 240 audio = 360 frames
         output = self.call({"motion_input": motion_input, "audio_input": audio_input})
-        output = output[:, 0:1, :]  # keep only first generated frame
-
-        # MOTION: shift buffer left, append new frame (keeps last 120)
+        output = output[:, 0:1, :]
         motion_input = tf.concat([motion_input[:, 1:, :], output], axis=1)
 ```
 
-**Critical requirements:**
-1. **Audio**: Pass FULL sequence upfront. Model slides 240-frame window from position 0 to position `steps`
-2. **Motion**: Only holds last 120 frames. Rolling buffer, not full history
-3. **Each step**: Processes 360 total frames (120 motion + 240 audio)
-4. **Memory per step**: ~5-10 MB for attention matrices. Should fit easily on any GPU
+**Critical**: Pass FULL audio sequence upfront. Model slides 240-frame window.
 
-**DO NOT chunk by restarting audio at position 0** - this breaks the sliding window!
+---
 
-### Why OOM Happens
-Not from single forward pass (only 360 frames). Caused by:
-- TensorFlow eager mode accumulating tensors across thousands of iterations
-- Python list `outputs.append()` holding tensor references
-- No garbage collection between iterations
+## Examples
 
-### Solution
-1. Enable TensorFlow memory growth before any TF operations
-2. Use single `infer_auto_regressive` call with full audio sequence
-3. Add garbage collection after generation completes
-
-## Dance Generation Pipeline
-
-### Overview
-```
-Audio (mp3) → FACT Model (Lambda) → SMPL Angles → Retargeting → Servo JSON → Robot
-```
-
-### Step-by-Step
-
-#### 1. Generate Dance Motion (Lambda Server)
-```bash
-ssh ubuntu@132.145.180.105
-python generate_dance.py --audio mHO2_house_120bpm.mp3 --output dance_house.npy --duration 30
-```
-- **Input**: Audio file (mp3)
-- **Output**:
-  - `dance_house.npy` - Raw motion [1797, 225] (6 padding + 3 translation + 24×9 rotation matrices)
-  - `dance_house_angles.npy` - Euler angles [1797, 24, 3] (24 SMPL joints × XYZ)
-
-#### 2. Retarget to Robot (Local)
-```bash
-python retarget_to_tonypi.py --input dance_house_angles.npy --output dance_house_tonypi.json
-```
-- **Input**: SMPL euler angles
-- **Output**: JSON with servo pulse values (0-1000 for bus servos, 1500-centered for PWM head servos)
-- Applies smoothing, scales angles to servo ranges, clamps to safe limits
-
-#### 3. Play on Robot
-```bash
-# Option A: Direct playback (on robot)
-python play_dance.py --input dance_house_tonypi.json --audio song.mp3
-
-# Option B: Stream via WebSocket
-# On robot: python servo_receiver.py --port 8766
-# On laptop: python fact_client.py --robot ws://192.168.149.1:8766
-```
-
-### JSON Format (Final Output)
-```json
-{
-  "fps": 60,
-  "n_frames": 1797,
-  "frames": [
-    {"time_ms": 16, "servos": {"1": 880, "2": 508, "pwm1": 1500, ...}},
-    ...
-  ]
-}
-```
-- **No further processing** - servo values sent directly to `board.bus_servo_set_position()`
-- Bus servos (body): IDs 1-16, pulse range 0-1000
-- PWM servos (head): "pwm1", "pwm2", pulse range ~1000-2000
-
-### Successful Test
-- Audio: `mHO2_house_120bpm.mp3` (AIST++ House track, 120 BPM)
-- Generated: 1797 frames (~30 seconds at 60fps)
-- Output files: `dance_house_angles.npy`, `dance_house_tonypi.json`
+The `examples/` folder contains:
+- `dance_house_tonypi.json` - Sample FACT dance output (retargeted)
+- `choreo.json` - Generated choreography
+- `mHO2.mp3` - House music track used for generation

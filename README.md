@@ -217,33 +217,40 @@ The result isn't a perfect recreation of the human dance, but it captures the es
 
 ---
 
-## Tony Pro Servo Mapping
+## TonyPi Pro Servo Mapping
 
-After discovery, the correct 16-servo mapping:
+**Bus Servos (IDs 1-16, pulse range 0-1000, center=500):**
 
 | ID | Joint | Group |
 |----|-------|-------|
-| 1 | right_hip_roll | right_leg |
-| 2 | right_hip_yaw | right_leg |
-| 3 | right_knee_pitch | right_leg |
-| 4 | right_hip_pitch | right_leg |
-| 5 | right_elbow_pitch | right_arm |
-| 6 | right_ankle_pitch | right_leg |
-| 7 | right_shoulder_pitch | right_arm |
-| 8 | head_pitch | head |
-| 9 | left_hip_roll | left_leg |
-| 10 | left_hip_yaw | left_leg |
-| 11 | left_knee_pitch | left_leg |
-| 12 | left_hip_pitch | left_leg |
-| 13 | left_elbow_pitch | left_arm |
-| 14 | left_ankle_pitch | left_leg |
-| 15 | left_shoulder_pitch | left_arm |
-| 16 | head_yaw | head |
+| 1 | l_ankle_roll | left_leg |
+| 2 | l_ankle_pitch | left_leg |
+| 3 | l_knee_pitch | left_leg |
+| 4 | l_hip_pitch | left_leg |
+| 5 | l_hip_roll | left_leg |
+| 6 | l_elbow_pitch | left_arm |
+| 7 | l_shoulder_roll | left_arm |
+| 8 | l_shoulder_pitch | left_arm |
+| 9 | r_ankle_roll | right_leg |
+| 10 | r_ankle_pitch | right_leg |
+| 11 | r_elbow_pitch | right_arm |
+| 12 | r_hip_pitch | right_leg |
+| 13 | r_hip_roll | right_leg |
+| 14 | r_knee_pitch | right_leg |
+| 15 | r_shoulder_roll | right_arm |
+| 16 | r_shoulder_pitch | right_arm |
+
+**PWM Servos (head, pulse range ~1000-2000, center=1500):**
+
+| ID | Joint |
+|----|-------|
+| pwm1 | head_pitch |
+| pwm2 | head_yaw |
 
 **Summary:**
-- Head: 2 DOF (pitch + yaw)
-- Each arm: 2 DOF (shoulder pitch + elbow pitch)
-- Each leg: 5 DOF (hip roll/yaw/pitch + knee + ankle)
+- Head: 2 DOF (PWM servos, not bus servos)
+- Each arm: 3 DOF (shoulder pitch + shoulder roll + elbow pitch)
+- Each leg: 5 DOF (hip pitch + hip roll + knee + ankle pitch + ankle roll)
 
 ---
 

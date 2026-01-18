@@ -73,23 +73,56 @@ SMPL (Skinned Multi-Person Linear Model) is a standard format for describing hum
  L ankle       R ankle
 ```
 
-### 2. Retargeting → Servo Values
+### 2. Retargeting → Dance JSON
 
-`retarget_to_tonypi.py` converts SMPL angles to TonyPi servo pulse values (0-1000 range). This maps the 24 human joints to the robot's 16 bus servos + 2 PWM head servos.
+`retarget_to_tonypi.py` converts SMPL angles to TonyPi servo pulse values, producing a **Dance JSON** file:
 
-### 3. Feature Matching → Choreography
+```json
+{
+  "fps": 60,
+  "n_frames": 1797,
+  "frames": [
+    {"time_ms": 16, "servos": {"1": 880, "2": 508, "8": 674, ...}},
+    {"time_ms": 16, "servos": {"1": 875, "2": 511, "8": 733, ...}},
+    ...
+  ]
+}
+```
 
-Instead of sending retargeted servo values directly (which can be unstable), we:
+Each frame contains servo pulse values (0-1000) for all 16 bus servos, representing what the robot "should" do if we directly played back the FACT output. But we don't use these values directly - see next step.
 
-1. **Extract motion features** from segments of the dance:
-   - Body part activity (arms, legs, both)
-   - Motion type (static, oscillating, cyclic, gesture)
-   - Periodicity and symmetry
-   - Energy (velocity, displacement)
+### 3. Feature Extraction & Matching → Choreography
 
-2. **Match to pre-scripted actions** from a library of 117 tested .d6a files
+Instead of sending the Dance JSON servo values directly to the robot (which causes stability issues), we use **feature-based matching** to convert it to a sequence of pre-scripted actions.
 
-3. **Generate choreography** - a timeline of action triggers synced to the music
+**The mathematical approach:**
+
+1. **Segment the dance** into variable-length windows using motion boundary detection (local minima in total velocity)
+
+2. **Extract features** from each segment:
+   - **Activity mask**: Which servo groups move (arms/legs) based on movement range > threshold
+   - **Motion type**: Classify as static/oscillating/cyclic/gesture using FFT frequency analysis
+   - **Periodicity**: Detect via autocorrelation peaks, extract dominant frequency
+   - **Symmetry**: Compute left-right correlation (mirror/parallel/one-sided/asymmetric)
+   - **Energy**: Total displacement, average velocity, peak velocity
+   - **Complexity**: Count of active degrees of freedom
+
+3. **Score similarity** between segment features and each library action using weighted matching:
+   ```
+   score = 0.25 × activity_jaccard
+         + 0.20 × motion_type_match
+         + 0.15 × periodicity_match
+         + 0.15 × symmetry_match
+         + 0.15 × energy_similarity
+         + 0.10 × complexity_match
+   ```
+
+4. **Select best action** for each segment, generating a choreography timeline:
+   ```json
+   {"time_ms": 0, "action": "go_forward", "score": 0.65}
+   {"time_ms": 1250, "action": "turn_left", "score": 0.73}
+   ...
+   ```
 
 ### 4. Playback
 
@@ -188,9 +221,14 @@ RobotRave/
 
 ---
 
-## Other Approaches
+## Why Not Direct Servo Playback?
 
-See [OLD_APPROACHES.md](OLD_APPROACHES.md) for previous approaches we tried:
-- Direct servo playback from FACT output
-- Beat-sync dancing with aubio
-- Real-time WebSocket streaming
+Our original approach was to map SMPL joint angles directly to servo commands and play them back frame-by-frame. This failed because:
+
+- **Collision detection**: SMPL assumes a human body with flesh and joints that can pass through each other in edge cases. The robot's rigid legs would collide, causing it to fall.
+- **Balance**: Human dancers constantly make micro-adjustments for balance. FACT doesn't output these, so the robot would tip over during weight shifts.
+- **Range mismatch**: FACT outputs use the full human joint range, but the robot's servos have mechanical limits. Clamping caused jerky, unnatural motion.
+
+The feature-based choreography approach sidesteps these issues by using **pre-tested, stable robot actions** that we know work, and just selecting *which* action to play based on what the AI dance is trying to do.
+
+See [OLD_APPROACHES.md](OLD_APPROACHES.md) for more details on approaches we tried.

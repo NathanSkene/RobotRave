@@ -9,6 +9,9 @@ Usage (on the robot):
     python play_dance.py --input dance.json
     python play_dance.py --input dance.json --audio song.mp3
 
+Step mode (advance frame-by-frame with spacebar):
+    python play_dance.py --input dance.json --step
+
 For testing without robot:
     python play_dance.py --input dance.json --simulate
 """
@@ -18,6 +21,8 @@ import json
 import time
 import sys
 import threading
+import tty
+import termios
 
 # Import the Tony Pro controller
 from tony_pro import TonyProController, get_neutral
@@ -76,6 +81,114 @@ def remove_servos(frames, skip_list):
                 filtered_servos[servo_id] = pulse
         filtered_frames.append({'time_ms': frame['time_ms'], 'servos': filtered_servos})
     return filtered_frames
+
+
+def scale_movements(frames, scale):
+    """Scale all movements toward center.
+
+    Args:
+        frames: List of frame dicts
+        scale: 0.0 = no movement (all center), 1.0 = full movement
+    """
+    BUS_CENTER = 500
+    PWM_CENTER = 1500
+
+    scaled_frames = []
+    for frame in frames:
+        scaled_servos = {}
+        for servo_id, pulse in frame['servos'].items():
+            if str(servo_id).startswith('pwm'):
+                # PWM servo: scale toward 1500
+                offset = pulse - PWM_CENTER
+                scaled_servos[servo_id] = int(PWM_CENTER + offset * scale)
+            else:
+                # Bus servo: scale toward 500
+                offset = pulse - BUS_CENTER
+                scaled_servos[servo_id] = int(BUS_CENTER + offset * scale)
+        scaled_frames.append({'time_ms': frame['time_ms'], 'servos': scaled_servos})
+    return scaled_frames
+
+
+def get_neutral_positions():
+    """Return neutral positions for all servos."""
+    # Bus servos (1-16) at center 500, PWM servos at 1500
+    positions = {}
+    for i in range(1, 17):
+        positions[str(i)] = 500
+    positions['pwm1'] = 1500
+    positions['pwm2'] = 1500
+    return positions
+
+
+def interpolate_to_position(controller, current_pos, target_pos, max_delta, total_time_ms, verbose=True):
+    """Move from current to target position, breaking into safe steps if needed.
+
+    Args:
+        controller: RobotController instance
+        current_pos: Dict of current servo positions {servo_id: pulse}
+        target_pos: Dict of target servo positions {servo_id: pulse}
+        max_delta: Maximum allowed change per step
+        total_time_ms: Total time for the move
+        verbose: Print interpolation info
+
+    Returns:
+        Dict of final positions (for tracking)
+    """
+    # Calculate the max delta across all servos
+    max_servo_delta = 0
+    max_servo_id = None
+    for servo_id, target in target_pos.items():
+        # Get current position, default to neutral
+        if str(servo_id).startswith('pwm'):
+            current = current_pos.get(str(servo_id), 1500)
+        else:
+            current = current_pos.get(str(servo_id), 500)
+        delta = abs(target - current)
+        if delta > max_servo_delta:
+            max_servo_delta = delta
+            max_servo_id = servo_id
+
+    if max_servo_delta <= max_delta:
+        # Safe to move directly
+        controller.set_servos(target_pos, total_time_ms)
+        # Update and return final positions
+        final_pos = current_pos.copy()
+        for servo_id, pulse in target_pos.items():
+            final_pos[str(servo_id)] = pulse
+        return final_pos
+
+    # Need interpolation
+    num_steps = int(max_servo_delta / max_delta) + 1
+    step_time = max(100, total_time_ms // num_steps)
+
+    if verbose:
+        print(f"  >> Interpolating: {num_steps} steps (max delta {max_servo_delta} on servo {max_servo_id})")
+
+    for step in range(1, num_steps + 1):
+        t = step / num_steps  # 0.0 to 1.0
+        intermediate = {}
+        for servo_id, target in target_pos.items():
+            # Get current position, default to neutral
+            if str(servo_id).startswith('pwm'):
+                current = current_pos.get(str(servo_id), 1500)
+            else:
+                current = current_pos.get(str(servo_id), 500)
+            intermediate[servo_id] = int(current + (target - current) * t)
+
+        if verbose:
+            print(f"    Step {step}/{num_steps}: moving to intermediate...", end='\r')
+
+        controller.set_servos(intermediate, step_time)
+        time.sleep(step_time / 1000.0)
+
+    if verbose:
+        print(f"    Completed {num_steps} interpolation steps" + " " * 20)
+
+    # Update and return final positions
+    final_pos = current_pos.copy()
+    for servo_id, pulse in target_pos.items():
+        final_pos[str(servo_id)] = pulse
+    return final_pos
 
 
 class RobotController:
@@ -211,6 +324,92 @@ def play_sequence_with_audio(controller, frames, audio_data, sample_rate, fps=60
             sd.stop()
 
 
+def get_keypress():
+    """Wait for a single keypress and return it."""
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+
+
+def play_sequence_step(controller, frames, move_time_ms=500, max_delta=50):
+    """Play a sequence frame-by-frame, advancing with spacebar.
+
+    Args:
+        controller: RobotController instance
+        frames: List of frame dicts from JSON
+        move_time_ms: Time in ms for servo to reach each position (default 500ms)
+        max_delta: Max servo position change per step (0=disable interpolation)
+
+    Controls:
+        SPACE - Advance to next frame
+        n - Skip 10 frames forward
+        b - Go back 10 frames
+        q or ESC - Quit
+    """
+    n_frames = len(frames)
+    current_frame = 0
+
+    # Track current servo positions (start at neutral)
+    current_positions = get_neutral_positions()
+
+    print(f"STEP MODE: {n_frames} frames (move time: {move_time_ms}ms, max-delta: {max_delta if max_delta > 0 else 'disabled'})")
+    print("Controls: SPACE=next, n=+10, b=-10, q=quit")
+    print("-" * 40)
+
+    try:
+        while True:
+            # Display current frame info
+            frame = frames[current_frame]
+            servo_preview = list(frame['servos'].items())[:3]
+            preview_str = ", ".join(f"{k}:{v}" for k, v in servo_preview)
+            print(f"Frame {current_frame}/{n_frames-1} ({100*current_frame/(n_frames-1):.0f}%) | {preview_str}...")
+
+            # Move to target position with safety interpolation
+            if max_delta > 0:
+                current_positions = interpolate_to_position(
+                    controller,
+                    current_positions,
+                    frame['servos'],
+                    max_delta,
+                    move_time_ms,
+                    verbose=True
+                )
+            else:
+                # No interpolation - direct move
+                controller.set_servos(frame['servos'], move_time_ms)
+                # Update tracked positions
+                for servo_id, pulse in frame['servos'].items():
+                    current_positions[str(servo_id)] = pulse
+
+            # Wait for keypress
+            key = get_keypress()
+
+            if key == ' ':
+                # Next frame
+                current_frame = min(current_frame + 1, n_frames - 1)
+                if current_frame == n_frames - 1:
+                    print("(last frame)")
+            elif key == 'n':
+                # Skip forward 10
+                current_frame = min(current_frame + 10, n_frames - 1)
+            elif key == 'b':
+                # Go back 10
+                current_frame = max(current_frame - 10, 0)
+            elif key in ('q', '\x1b'):  # q or ESC
+                print("\nStopped by user")
+                break
+            elif key == '\x03':  # Ctrl+C
+                raise KeyboardInterrupt
+
+    except KeyboardInterrupt:
+        print("\nStopped by user")
+
+
 def play_sequence(controller, frames, fps=60, loop=False):
     """Play a sequence of frames on the robot.
 
@@ -264,6 +463,11 @@ def main():
     parser.add_argument('--neutral-after', action='store_true', help='Go to neutral after playing')
     parser.add_argument('--safe', action='store_true', help='Safe mode: clamp servos to central range (300-700 bus, 1200-1800 PWM)')
     parser.add_argument('--skip-servos', type=str, default='', help='Comma-separated list of servo IDs to skip (e.g., "15,16,pwm1")')
+    parser.add_argument('--scale', type=float, default=1.0, help='Scale movements toward center (0.0=none, 1.0=full, 0.5=half)')
+    parser.add_argument('--step', action='store_true', help='Step mode: advance one frame at a time with spacebar')
+    parser.add_argument('--step-time', type=int, default=500, help='Movement time in ms for step mode (default: 500)')
+    parser.add_argument('--max-delta', type=int, default=50, help='Max servo position change per step (default: 50, 0=disable)')
+    parser.add_argument('--unsafe', action='store_true', help='Disable automatic safe mode in step mode')
     args = parser.parse_args()
 
     # Load dance data
@@ -274,9 +478,15 @@ def main():
     frames = data['frames']
     fps = args.fps if args.fps else data.get('fps', 60)
 
-    # Apply safe mode clamping if requested
-    if args.safe:
-        print("SAFE MODE: Clamping servos to central range (300-700 bus, 1200-1800 PWM)")
+    # Step mode forces safe mode unless --unsafe is specified
+    use_safe_mode = args.safe or (args.step and not args.unsafe)
+
+    # Apply safe mode clamping if requested or auto-enabled
+    if use_safe_mode:
+        if args.step and not args.safe:
+            print("SAFE MODE (auto): Step mode enables safe clamping. Use --unsafe to disable.")
+        else:
+            print("SAFE MODE: Clamping servos to central range (300-700 bus, 1200-1800 PWM)")
         frames = clamp_to_safe(frames)
 
     # Remove skipped servos
@@ -284,6 +494,11 @@ def main():
         skip_list = args.skip_servos.split(',')
         print(f"SKIPPING SERVOS: {skip_list}")
         frames = remove_servos(frames, skip_list)
+
+    # Scale movements toward center
+    if args.scale != 1.0:
+        print(f"SCALING MOVEMENTS: {args.scale:.0%} of full range")
+        frames = scale_movements(frames, args.scale)
 
     print(f"Loaded {len(frames)} frames, {fps} FPS")
     print(f"Duration: {len(frames)/fps:.1f} seconds")
@@ -303,7 +518,9 @@ def main():
         controller.go_to_neutral()
 
     # Play the sequence
-    if audio_data is not None:
+    if args.step:
+        play_sequence_step(controller, frames, move_time_ms=args.step_time, max_delta=args.max_delta)
+    elif audio_data is not None:
         play_sequence_with_audio(controller, frames, audio_data, sample_rate,
                                   fps=fps, loop=args.loop)
     else:
